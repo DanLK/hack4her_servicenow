@@ -220,10 +220,15 @@ if TAPEAGENTS_AVAILABLE:
     class ChildcareSupportAgent(Agent[DialogTape]):
         
         def make_prompt(self, tape: DialogTape):
-            return Prompt(messages=[{"role": "system", "content": tape.steps[0].content}] + [
-                {"role": "user" if isinstance(step, UserStep) else "assistant", "content": step.content}
-                for step in tape.steps[1:]
-            ])
+            messages = []
+            for step in tape.steps:
+                if isinstance(step, SystemStep):
+                    messages.append({"role": "system", "content": step.content})
+                elif isinstance(step, UserStep):
+                    messages.append({"role": "user", "content": step.content})
+                elif isinstance(step, AssistantStep):
+                    messages.append({"role": "assistant", "content": step.content})
+            return Prompt(messages=messages)
             
         def generate_steps(self, tape: DialogTape, llm_stream):
             buffer = []
@@ -232,7 +237,8 @@ if TAPEAGENTS_AVAILABLE:
                     buffer.append(event.chunk)
                     yield PartialStep(step=AssistantStep(content="".join(buffer)))
                 elif event.output:
-                    yield AssistantStep(content=event.output.content or "")
+                    final_content = event.output.content or "".join(buffer)
+                    yield AssistantStep(content=final_content)
                     return
                 else:
                     raise ValueError(f"Unknown event type from LLM: {event}")
@@ -276,8 +282,22 @@ class ChatbotInterface:
         try:
             self.enhanced_agent = ChildcareSupportAgent.create(llm, name="childcare_agent")
             print("✅ ChildcareSupportAgent created successfully")
+            
+            # Test the LLM directly
+            print("🧪 Testing LLM directly...")
+            test_prompt = Prompt(messages=[{"role": "user", "content": "Hello, can you help me with childcare applications?"}])
+            test_stream = llm.stream(test_prompt)
+            test_response = ""
+            for event in test_stream:
+                if event.output:
+                    test_response = event.output.content
+                    break
+            print(f"🧪 Direct LLM test response: {test_response[:100]}...")
+            
         except Exception as e:
             print(f"❌ Failed to create ChildcareSupportAgent: {e}")
+            import traceback
+            traceback.print_exc()
             self.enhanced_agent = None
         
         try:
@@ -306,11 +326,14 @@ Use this guide to explain flags to municipality workers.
 """
         
         system_content = (
-            "You are a childcare support assistant for municipality workers reviewing applications. "
-            "You explain application flags and decisions made by an external deterministic program. " + 
-            flag_guide +
-            f"These are the regulations used for the decision making: {regulation} " +
-            f"And this is the summary of the decisions for several applications: {summary}"
+            "You are a helpful childcare support assistant for municipality workers reviewing childcare subsidy applications. "
+            "Your role is to explain application flags, decisions, and regulations in a clear and helpful manner. "
+            "Always provide detailed, informative responses to help municipality workers understand the childcare subsidy system. "
+            "When asked about flags, explain what they mean and their implications. "
+            "When asked general questions, provide helpful information about the childcare subsidy process. "
+            + flag_guide +
+            f"\n\nRegulations: {regulation[:1000]}..." +
+            f"\n\nDecision summaries available: {summary[:500]}..."
         )
         
         self.conversation_tape = DialogTape(
@@ -940,6 +963,46 @@ def test_chatbot():
                 "enhanced_agent_available": chatbot.enhanced_agent is not None if 'chatbot' in globals() else False,
                 "conversation_tape_available": chatbot.conversation_tape is not None if 'chatbot' in globals() else False
             }
+        }), 500
+
+@app.route('/api/chatbot/direct', methods=['POST'])
+def test_direct_llm():
+    if not TAPEAGENTS_AVAILABLE or not chatbot.enhanced_agent:
+        return jsonify({"error": "Enhanced chatbot not available"}), 400
+    
+    try:
+        data = request.get_json()
+        test_query = data.get('query', 'Hello, can you help me?')
+        
+        # Create a fresh conversation tape for this test
+        system_content = "You are a helpful childcare support assistant. Respond naturally to user questions."
+        tape = DialogTape(context=None, steps=[SystemStep(content=system_content)])
+        tape = tape.append(UserStep(content=test_query))
+        
+        response_content = ""
+        event_count = 0
+        
+        for event in chatbot.enhanced_agent.run(tape):
+            event_count += 1
+            if event.final_tape:
+                final_tape = event.final_tape
+                last_step = final_tape.steps[-1]
+                if hasattr(last_step, 'content'):
+                    response_content = last_step.content
+                break
+        
+        return jsonify({
+            "query": test_query,
+            "response": response_content,
+            "events_processed": event_count,
+            "success": bool(response_content)
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
         }), 500
 
 @app.route('/api/review/<application_id>', methods=['POST'])
@@ -1578,6 +1641,7 @@ DETAIL_TEMPLATE = '''
             <div class="chatbot-container">
                 <div class="chatbot-controls">
                     <button onclick="testChatbot()" class="test-btn">🧪 Test LLM Connection</button>
+                    <button onclick="testDirectLLM()" class="test-btn">⚡ Test Direct LLM</button>
                 </div>
                 <div id="chat-messages" class="chat-messages"></div>
                 <div class="chat-input-container">
@@ -1751,6 +1815,58 @@ DETAIL_TEMPLATE = '''
                 messagesContainer.innerHTML += `
                     <div class="chat-message error-message">
                         <strong>Test Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function testDirectLLM() {
+            const messagesContainer = document.getElementById('chat-messages');
+            
+            messagesContainer.innerHTML += `
+                <div class="chat-message system-message">
+                    <strong>Direct LLM Test:</strong> Testing LLM with fresh conversation...
+                </div>
+            `;
+            
+            try {
+                const response = await fetch('/api/chatbot/direct', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: 'What are childcare application flags and what do they mean?'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message system-message">
+                            <strong>Direct LLM Results:</strong><br>
+                            Success: ${result.success}<br>
+                            Events Processed: ${result.events_processed}<br>
+                            <br><strong>Direct LLM Response:</strong><br>
+                            <pre>${result.response}</pre>
+                        </div>
+                    `;
+                } else {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message error-message">
+                            <strong>Direct Test Failed:</strong> ${result.error}<br>
+                            ${result.traceback ? '<details><summary>Details</summary><pre>' + result.traceback + '</pre></details>' : ''}
+                        </div>
+                    `;
+                }
+                
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+            } catch (error) {
+                messagesContainer.innerHTML += `
+                    <div class="chat-message error-message">
+                        <strong>Direct Test Error:</strong> ${error.message}
                     </div>
                 `;
             }
