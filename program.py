@@ -1,16 +1,149 @@
 import json
 import hashlib
+import os
+import sys
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 from flask import Flask, render_template_string, request, jsonify
 from abc import ABC, abstractmethod
 
+# Import tapeagents for summary generation (if available)
+TAPEAGENTS_AVAILABLE = False
+try:
+    sys.path.append(os.path.abspath('tapeagents'))
+    from tapeagents.llms import OpenrouterLLM
+    from tapeagents.agent import Agent
+    from tapeagents.core import Prompt
+    from tapeagents.dialog_tape import DialogTape, UserStep
+    from tapeagents.orchestrator import main_loop
+    from tapeagents.environment import ToolCollectionEnvironment
+    from tapeagents.tools.calculator import Calculator
+    from tapeagents.nodes import StandardNode, Stop
+    TAPEAGENTS_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  TapeAgents not available: {e}")
+
 class LLMInterface(ABC):
     
     @abstractmethod
     def analyze_application(self, application_data: Dict[str, Any]) -> Dict[str, str]:
         pass
+
+class SummaryAgentLLMProvider(LLMInterface):
+    
+    def __init__(self):
+        if not TAPEAGENTS_AVAILABLE:
+            raise ImportError("TapeAgents library is not available")
+            
+        # Initialize OpenrouterLLM
+        api_key = "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"
+        self.llm = OpenrouterLLM(
+            model_name="meta-llama/llama-3.3-70b-instruct:free",
+            api_token=api_key,
+            parameters={"temperature": 0.1},
+        )
+        
+        # Initialize environment and agent
+        self.environment = ToolCollectionEnvironment(tools=[Calculator()])
+        self.environment.initialize()
+        
+        # Load regulation
+        try:
+            with open("Synthetic Childcare Subsidy Regulation.md", "r") as f:
+                regulation = f.read()
+        except FileNotFoundError:
+            regulation = "No regulation file found"
+        
+        system_prompt = f"""You are a childcare subsidy decision summary agent. Your job is to create clear, professional summaries of subsidy decisions that have already been made by a previous decision-making agent.
+
+## CHILDCARE SUBSIDY REGULATION:
+{regulation}
+
+You will receive:
+- Application data
+- Eligibility assessment (the final decision)
+- Validation flags (issues or criteria that were flagged)
+
+## YOUR TASK FOR EACH CASE:
+Create a professional summary of this childcare subsidy decision including:
+1. **Case Overview**: Brief description of applicant and case
+2. **Final Decision**: State the eligibility assessment clearly
+3. **Validation Flags Explanation**: Explain what each validation flag means in plain language
+4. **Key Factors**: Main factors that influenced the decision based on the flags
+5. **Financial Impact**: If eligible, mention subsidy calculations
+6. **Administrative Notes**: Important procedural information
+
+## IMPORTANT GUIDELINES:
+1. Summarizing the eligibility assessment clearly
+2. Explaining validation flags in plain language and how they influenced the decision
+3. Do NOT re-evaluate or change the eligibility assessment - only summarize what was already decided."""
+        
+        self.agent = Agent.create(
+            llms=self.llm,
+            nodes=[
+                StandardNode(
+                    name="summary",
+                    system_prompt=system_prompt,
+                    guidance="Review the decision data and flags provided, then create a professional summary of the childcare subsidy decision. Focus on clarity and completeness for official documentation.",
+                ),
+                Stop(),
+            ],
+            known_actions=self.environment.actions(),
+            tools_description=self.environment.tools_description(),
+        )
+    
+    def analyze_application(self, application_data: Dict[str, Any]) -> Dict[str, str]:
+        flags_dict = asdict(application_data['validation_flags'])
+        active_flags = [k for k, v in flags_dict.items() if v]
+        
+        # Original decision logic
+        if len(active_flags) > 5:
+            decision = "REVIEW"
+            analysis = f"Application requires human review due to multiple validation issues: {', '.join(active_flags[:3])}..."
+        elif any(flag in ['income_threshold_exceeded', 'missing_required_fields'] for flag in active_flags):
+            decision = "REVIEW"
+            analysis = "Application has critical issues that require careful review."
+        else:
+            decision = "REVIEW"
+            analysis = "Standard application processing required."
+        
+        # Generate professional summary using summary-agent
+        try:
+            eligibility_assessment = application_data.get('eligibility_assessment', decision)
+            
+            user_message = f"""## APPLICATION DATA:
+{json.dumps(application_data, indent=2)}
+
+## ELIGIBILITY DECISION:
+{eligibility_assessment}
+
+## VALIDATION FLAGS:
+{", ".join(active_flags) if active_flags else "No validation flags"}"""
+            
+            tape = DialogTape(steps=[UserStep(content=user_message)])
+            
+            for event in main_loop(self.agent, tape, self.environment):
+                if event.agent_tape:
+                    tape = event.agent_tape
+            
+            # Extract summary from tape
+            if len(tape.steps) >= 2 and hasattr(tape.steps[-2], 'reasoning'):
+                professional_summary = tape.steps[-2].reasoning
+            elif len(tape.steps) >= 1 and hasattr(tape.steps[-1], 'reasoning'):
+                professional_summary = tape.steps[-1].reasoning
+            else:
+                professional_summary = str(tape.steps[-1]) if tape.steps else analysis
+                
+        except Exception as e:
+            print(f"Summary agent error: {e}")
+            professional_summary = analysis
+        
+        return {
+            'analysis': professional_summary,
+            'decision': decision,
+            'reasoning': f"Based on validation flags: {', '.join(active_flags) if active_flags else 'No major issues detected'}"
+        }
 
 class MockLLMProvider(LLMInterface):
     
@@ -29,11 +162,57 @@ class MockLLMProvider(LLMInterface):
             decision = "REVIEW"
             analysis = "Standard application processing required."
         
+        # Create a professional-style summary even without TapeAgents
+        app_id = application_data.get('application_id', 'Unknown')
+        income = application_data.get('household_income', 0)
+        num_children = application_data.get('num_children', 0)
+        hours = application_data.get('childcare_hours_requested', 0)
+        eligibility = application_data.get('eligibility_assessment', decision)
+        
+        professional_summary = f"""**CHILDCARE SUBSIDY DECISION SUMMARY**
+
+**Case Overview:**
+Application {app_id} - Household with {num_children} child{'ren' if num_children != 1 else ''}, requesting {hours} hours/month of childcare assistance.
+Household income: ${income:,}
+
+**Final Decision:** {eligibility}
+
+**Validation Flags Analysis:**
+{self._format_flag_explanations(active_flags) if active_flags else "No validation issues identified."}
+
+**Key Factors:**
+- Application assessed using standard eligibility criteria
+- {len(active_flags)} validation flag(s) identified requiring attention
+- Decision based on regulatory compliance and risk assessment
+
+**Administrative Notes:**
+This summary was generated using automated decision support tools. Manual review recommended for complex cases."""
+        
         return {
-            'analysis': analysis,
+            'analysis': professional_summary,
             'decision': decision,
             'reasoning': f"Based on validation flags: {', '.join(active_flags) if active_flags else 'No major issues detected'}"
         }
+    
+    def _format_flag_explanations(self, active_flags: List[str]) -> str:
+        explanations = {
+            'income_threshold_exceeded': '• Income exceeds 75th percentile threshold - may affect subsidy eligibility',
+            'missing_required_fields': '• Required application fields are incomplete - documentation needed',
+            'employment_status_invalid': '• Employment status does not match accepted categories',
+            'child_age_inconsistency': '• Child age information is inconsistent or exceeds program limits',
+            'high_hours_request': '• Requested childcare hours exceed standard thresholds',
+            'documentation_incomplete': '• Supporting documentation is missing or insufficient',
+            'inconsistent_data_format': '• Data format inconsistencies detected in application'
+        }
+        
+        result = []
+        for flag in active_flags:
+            if flag in explanations:
+                result.append(explanations[flag])
+            else:
+                result.append(f"• {flag.replace('_', ' ').title()}: Requires review")
+        
+        return '\n'.join(result)
 
 class ChatbotInterface:
     
@@ -374,7 +553,18 @@ processed_applications = []
 processor = SubsidyApplicationProcessor()
 
 
-llm_provider = MockLLMProvider()
+# Use SummaryAgentLLMProvider for enhanced summaries, fallback to MockLLMProvider
+if TAPEAGENTS_AVAILABLE:
+    try:
+        llm_provider = SummaryAgentLLMProvider()
+        print("✅ Summary-agent LLM provider initialized successfully")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not initialize summary-agent, falling back to mock provider: {e}")
+        llm_provider = MockLLMProvider()
+else:
+    print("ℹ️  TapeAgents not available, using MockLLMProvider with enhanced summaries")
+    llm_provider = MockLLMProvider()
+
 chatbot = ChatbotInterface(llm_provider)
 
 
@@ -987,6 +1177,39 @@ DETAIL_TEMPLATE = '''
             <div class="field-value">{{ application.eligibility_assessment }}</div>
         </div>
 
+        <div class="section">
+            <h2>AI-Generated Summary</h2>
+            {% if application.llm_analysis %}
+                <div class="llm-analysis-result">
+                    <div class="field">
+                        <div class="field-label">Professional Summary</div>
+                        <div class="field-value summary-content">{{ application.llm_analysis }}</div>
+                    </div>
+                    {% if application.llm_decision %}
+                    <div class="field">
+                        <div class="field-label">AI Decision</div>
+                        <div class="field-value">{{ application.llm_decision }}</div>
+                    </div>
+                    {% endif %}
+                    {% if application.llm_reasoning %}
+                    <div class="field">
+                        <div class="field-label">AI Reasoning</div>
+                        <div class="field-value">{{ application.llm_reasoning }}</div>
+                    </div>
+                    {% endif %}
+                    <button onclick="analyzeLLM('{{ application.application_id }}')" class="analyze-button" style="margin-top: 12px;">
+                        🔄 Regenerate Summary
+                    </button>
+                </div>
+            {% else %}
+                <button id="analyze-btn" onclick="analyzeLLM('{{ application.application_id }}')" class="analyze-button">
+                    🤖 Generate AI Summary
+                </button>
+                <div id="llm-results" style="display: none; margin-top: 16px;">
+                    <!-- LLM results will be populated here -->
+                </div>
+            {% endif %}
+        </div>
 
         <div class="section">
             <h2>Review Status</h2>
@@ -1468,6 +1691,23 @@ DETAIL_TEMPLATE = '''
         .status-review {
             background: #ff8c00;
             color: white;
+        }
+        .llm-analysis-result {
+            background: #f8f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #d4e6ff;
+        }
+        .summary-content {
+            white-space: pre-wrap;
+            line-height: 1.6;
+            font-size: 14px;
+            background: white;
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+            max-height: 400px;
+            overflow-y: auto;
         }
     </style>
 </body>
