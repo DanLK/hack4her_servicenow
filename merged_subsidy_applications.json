@@ -1,0 +1,697 @@
+[
+  {
+    "application_id": "A001",
+    "applicant_name": "Laura Visser",
+    "household_income": 63506,
+    "employment_status": "unemployed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 137,
+    "housing_situation": "municipal housing",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": true,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A006",
+    "applicant_name": "Laura Visser",
+    "household_income": 63506,
+    "employment_status": "unemployed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 127,
+    "housing_situation": "municipal housing",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": true,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A010",
+    "applicant_name": "Laura Visser",
+    "household_income": 63506,
+    "employment_status": "unemployed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 123,
+    "housing_situation": "municipal housing",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": true,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A013",
+    "applicant_name": "Laura Visser",
+    "household_income": 63506,
+    "employment_status": "unemployed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 111,
+    "housing_situation": "municipal housing",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": true,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A016",
+    "applicant_name": "Laura Visser",
+    "household_income": 63506,
+    "employment_status": "unemployed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 122,
+    "housing_situation": "municipal housing",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": true,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A002",
+    "applicant_name": "Amina Hassan",
+    "household_income": 20130,
+    "employment_status": "unemployed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 100,
+    "housing_situation": "temporary shelter",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A020",
+    "applicant_name": "Amina Hassan",
+    "household_income": 20130,
+    "employment_status": "unemployed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 62,
+    "housing_situation": "temporary shelter",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A003",
+    "applicant_name": "Raj Patel",
+    "household_income": 22287,
+    "employment_status": "part-time",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 71,
+    "housing_situation": "rental",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "housing benefit",
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A008",
+    "applicant_name": "Raj Patel",
+    "household_income": 22287,
+    "employment_status": "part-time",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 83,
+    "housing_situation": "rental",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "housing benefit",
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A012",
+    "applicant_name": "Raj Patel",
+    "household_income": 22287,
+    "employment_status": "part-time",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 48,
+    "housing_situation": "rental",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "housing benefit",
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A019",
+    "applicant_name": "Raj Patel",
+    "household_income": 22287,
+    "employment_status": "part-time",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 44,
+    "housing_situation": "rental",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "housing benefit",
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A004",
+    "applicant_name": "Mohammed El Amrani",
+    "household_income": 89012,
+    "employment_status": "part-time",
+    "num_children": 1,
+    "child_ages": [
+      6
+    ],
+    "childcare_hours_requested": 97,
+    "housing_situation": "municipal housing",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A005",
+    "applicant_name": "Anouk Smit",
+    "household_income": 40585,
+    "employment_status": "self-employed",
+    "num_children": 3,
+    "child_ages": [
+      2,
+      5,
+      6
+    ],
+    "childcare_hours_requested": 104,
+    "housing_situation": "owned",
+    "partner_employed": false,
+    "recent_municipal_support": [
+      "housing benefit",
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": true,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A014",
+    "applicant_name": "Anouk Smit",
+    "household_income": 40585,
+    "employment_status": "self-employed",
+    "num_children": 3,
+    "child_ages": [
+      2,
+      5,
+      6
+    ],
+    "childcare_hours_requested": 42,
+    "housing_situation": "owned",
+    "partner_employed": false,
+    "recent_municipal_support": [
+      "housing benefit",
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A007",
+    "applicant_name": "Kimberly van Dijk",
+    "household_income": 38086,
+    "employment_status": "unemployed",
+    "num_children": 4,
+    "child_ages": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "childcare_hours_requested": 86,
+    "housing_situation": "temporary shelter",
+    "partner_employed": false,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A009",
+    "applicant_name": "Sara Nguyen",
+    "household_income": 23952,
+    "employment_status": "self-employed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 82,
+    "housing_situation": "municipal housing",
+    "partner_employed": false,
+    "recent_municipal_support": [
+      "housing benefit"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A015",
+    "applicant_name": "Sara Nguyen",
+    "household_income": 23952,
+    "employment_status": "self-employed",
+    "num_children": 1,
+    "child_ages": [
+      3
+    ],
+    "childcare_hours_requested": 137,
+    "housing_situation": "municipal housing",
+    "partner_employed": false,
+    "recent_municipal_support": [
+      "housing benefit"
+    ],
+    "flags": {
+      "incomplete_docs": false,
+      "high_hours_request": true,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A011",
+    "applicant_name": "Carlos Mendes",
+    "household_income": 44269,
+    "employment_status": "part-time",
+    "num_children": 3,
+    "child_ages": [
+      1,
+      3,
+      5
+    ],
+    "childcare_hours_requested": 62,
+    "housing_situation": "rental",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A017",
+    "applicant_name": "Fatima de Jong",
+    "household_income": 82736,
+    "employment_status": "part-time",
+    "num_children": 1,
+    "child_ages": [
+      0
+    ],
+    "childcare_hours_requested": 68,
+    "housing_situation": "municipal housing",
+    "partner_employed": false,
+    "recent_municipal_support": [
+      "housing benefit",
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "application_id": "A018",
+    "applicant_name": "Jeroen Bakker",
+    "household_income": 59549,
+    "employment_status": "self-employed",
+    "num_children": 1,
+    "child_ages": [
+      1
+    ],
+    "childcare_hours_requested": 99,
+    "housing_situation": "temporary shelter",
+    "partner_employed": true,
+    "recent_municipal_support": [
+      "food aid"
+    ],
+    "flags": {
+      "incomplete_docs": true,
+      "high_hours_request": false,
+      "income_mismatch": false
+    }
+  },
+  {
+    "applicant_name": "Carlos Hoefdraad",
+    "household_income": 60285,
+    "employment_status": "unemployed",
+    "partner_employed": true,
+    "housing_situation": "rented",
+    "number_of_children": 0,
+    "child_ages": [
+      0
+    ],
+    "requested_hours": 98
+  },
+  {
+    "applicant_name": "Renée Rambaran",
+    "household_income": 57344,
+    "employment_status": "employed",
+    "partner_employed": false,
+    "housing_situation": "temporary shelter",
+    "number_of_children": 0,
+    "child_ages": [
+      8,
+      11
+    ],
+    "requested_hours": 40
+  },
+  {
+    "applicant_name": "Ahmed El Idrissi",
+    "household_income": 23132,
+    "employment_status": "part-time",
+    "partner_employed": false,
+    "housing_situation": "with relatives",
+    "number_of_children": 1,
+    "child_ages": [],
+    "requested_hours": 129
+  },
+  {
+    "applicant_name": "Fatima Benali",
+    "household_income": 16897,
+    "employment_status": "part-time",
+    "partner_employed": true,
+    "housing_situation": "with relatives",
+    "number_of_children": 1,
+    "child_ages": [
+      2,
+      6,
+      12,
+      13
+    ],
+    "requested_hours": 125
+  },
+  {
+    "applicant_name": "Emine Kaya",
+    "household_income": 49065,
+    "employment_status": "freelancer",
+    "partner_employed": false,
+    "housing_situation": "with relatives",
+    "number_of_children": 1,
+    "child_ages": [
+      3,
+      10,
+      14
+    ],
+    "requested_hours": 108
+  },
+  {
+    "applicant_name": "Mustafa Yilmaz",
+    "household_income": 20507,
+    "employment_status": "employed",
+    "partner_employed": false,
+    "housing_situation": "owned",
+    "number_of_children": 4,
+    "child_ages": [
+      5,
+      9,
+      9,
+      14
+    ],
+    "requested_hours": 109
+  },
+  {
+    "applicant_name": "Dewi Handoko",
+    "household_income": 47560,
+    "employment_status": "unemployed",
+    "partner_employed": true,
+    "housing_situation": "owned",
+    "number_of_children": 0,
+    "child_ages": [
+      0,
+      4,
+      8,
+      12
+    ],
+    "requested_hours": 55
+  },
+  {
+    "applicant_name": "Sinta Wijaya",
+    "household_income": 38579,
+    "employment_status": "student",
+    "partner_employed": false,
+    "housing_situation": "owned",
+    "number_of_children": 0,
+    "child_ages": [
+      8,
+      9,
+      13,
+      15
+    ],
+    "requested_hours": 22
+  },
+  {
+    "applicant_name": "Jakub Nowak",
+    "household_income": 58275,
+    "employment_status": "student",
+    "partner_employed": false,
+    "housing_situation": "with relatives",
+    "number_of_children": 0,
+    "child_ages": [],
+    "requested_hours": 24
+  },
+  {
+    "applicant_name": "Anna Kowalska",
+    "household_income": 20971,
+    "employment_status": "unemployed",
+    "partner_employed": true,
+    "housing_situation": "owned",
+    "number_of_children": 3,
+    "child_ages": [],
+    "requested_hours": 131
+  },
+  {
+    "applicant_name": "Ahmad Rahimi",
+    "household_income": 20764,
+    "employment_status": "student",
+    "partner_employed": true,
+    "housing_situation": "rented",
+    "number_of_children": 0,
+    "child_ages": [],
+    "requested_hours": 121
+  },
+  {
+    "applicant_name": "Leila Hassan",
+    "household_income": 15427,
+    "employment_status": "freelancer",
+    "partner_employed": true,
+    "housing_situation": "rented",
+    "number_of_children": 1,
+    "child_ages": [
+      3,
+      4,
+      12
+    ],
+    "requested_hours": 104
+  },
+  {
+    "applicant_name": "Maaike de Jong",
+    "household_income": 68971,
+    "employment_status": "employed",
+    "partner_employed": false,
+    "housing_situation": "owned",
+    "number_of_children": 4,
+    "child_ages": [
+      12
+    ],
+    "requested_hours": 37
+  },
+  {
+    "applicant_name": "Bram van Dijk",
+    "household_income": 62035,
+    "employment_status": "part-time",
+    "partner_employed": false,
+    "housing_situation": "temporary shelter",
+    "number_of_children": 1,
+    "child_ages": [
+      1,
+      2,
+      10
+    ],
+    "requested_hours": 149
+  },
+  {
+    "applicant_name": "Priya Sharma",
+    "household_income": 46942,
+    "employment_status": "freelancer",
+    "partner_employed": true,
+    "housing_situation": "rented",
+    "number_of_children": 4,
+    "child_ages": [
+      5,
+      10
+    ],
+    "requested_hours": 94
+  },
+  {
+    "applicant_name": "Kwame Mensah",
+    "household_income": 38757,
+    "employment_status": "part-time",
+    "partner_employed": false,
+    "housing_situation": "rented",
+    "number_of_children": 2,
+    "child_ages": [
+      4,
+      4,
+      12,
+      13
+    ],
+    "requested_hours": 78
+  },
+  {
+    "applicant_name": "Aisha Mohammed",
+    "household_income": 72552,
+    "employment_status": "employed",
+    "partner_employed": true,
+    "housing_situation": "with relatives",
+    "number_of_children": 0,
+    "child_ages": [
+      14
+    ],
+    "requested_hours": 88
+  },
+  {
+    "applicant_name": "Igor Petrov",
+    "household_income": 39017,
+    "employment_status": "employed",
+    "partner_employed": false,
+    "housing_situation": "temporary shelter",
+    "number_of_children": 2,
+    "child_ages": [
+      11,
+      13,
+      15,
+      15
+    ],
+    "requested_hours": 102
+  },
+  {
+    "applicant_name": "Lucia Fernández",
+    "household_income": 61580,
+    "employment_status": "unemployed",
+    "partner_employed": false,
+    "housing_situation": "rented",
+    "number_of_children": 1,
+    "child_ages": [
+      13
+    ],
+    "requested_hours": 121
+  },
+  {
+    "applicant_name": "Sophie Dubois",
+    "household_income": 36271,
+    "employment_status": "unemployed",
+    "partner_employed": true,
+    "housing_situation": "temporary shelter",
+    "number_of_children": 1,
+    "child_ages": [
+      0,
+      15
+    ],
+    "requested_hours": 122
+  }
+]
