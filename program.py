@@ -36,7 +36,7 @@ class SummaryAgentLLMProvider(LLMInterface):
         if not TAPEAGENTS_AVAILABLE:
             raise ImportError("TapeAgents library is not available")
             
-        api_key = "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"
+        api_key = "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"
         self.llm = OpenrouterLLM(
             model_name="meta-llama/llama-3.3-70b-instruct:free",
             api_token=api_key,
@@ -291,7 +291,7 @@ class ChatbotInterface:
         if not TAPEAGENTS_AVAILABLE:
             return
             
-        api_key = "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"
+        api_key = "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"
         llm = OpenrouterLLM(
             model_name="meta-llama/llama-3.3-70b-instruct:free",
             api_token=api_key,
@@ -369,7 +369,7 @@ Use this guide to explain flags to municipality workers.
             
             print("🔍 Testing direct API call to OpenRouter...")
             
-            api_key = "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"
+            api_key = "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"
             
             # Test direct API call
             url = "https://openrouter.ai/api/v1/chat/completions"
@@ -500,7 +500,7 @@ Use this guide to explain flags to municipality workers.
             print("✅ Imported DialogTape classes")
             
             # Create LLM and test it first
-            api_key = "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"
+            api_key = "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"
             print(f"🔍 Using API key: {api_key[:20]}...")
             
             llm = OpenrouterLLM(
@@ -1338,7 +1338,7 @@ def test_raw_api():
         
         print("🔍 Testing raw API call from endpoint...")
         
-        api_key = "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"
+        api_key = "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"
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
