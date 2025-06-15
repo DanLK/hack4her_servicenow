@@ -6,9 +6,9 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, asdict
 from flask import Flask, render_template_string, request, jsonify
+import re
 from abc import ABC, abstractmethod
 
-# Import tapeagents for summary generation (if available)
 TAPEAGENTS_AVAILABLE = False
 try:
     sys.path.append(os.path.abspath('tapeagents'))
@@ -36,7 +36,6 @@ class SummaryAgentLLMProvider(LLMInterface):
         if not TAPEAGENTS_AVAILABLE:
             raise ImportError("TapeAgents library is not available")
             
-        # Initialize OpenrouterLLM
         api_key = "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"
         self.llm = OpenrouterLLM(
             model_name="meta-llama/llama-3.3-70b-instruct:free",
@@ -44,11 +43,9 @@ class SummaryAgentLLMProvider(LLMInterface):
             parameters={"temperature": 0.1},
         )
         
-        # Initialize environment and agent
         self.environment = ToolCollectionEnvironment(tools=[Calculator()])
         self.environment.initialize()
         
-        # Load regulation
         try:
             with open("Synthetic Childcare Subsidy Regulation.md", "r") as f:
                 regulation = f.read()
@@ -97,7 +94,6 @@ Create a professional summary of this childcare subsidy decision including:
         flags_dict = asdict(application_data['validation_flags'])
         active_flags = [k for k, v in flags_dict.items() if v]
         
-        # Original decision logic
         if len(active_flags) > 5:
             decision = "REVIEW"
             analysis = f"Application requires human review due to multiple validation issues: {', '.join(active_flags[:3])}..."
@@ -108,11 +104,15 @@ Create a professional summary of this childcare subsidy decision including:
             decision = "REVIEW"
             analysis = "Standard application processing required."
         
-        # Generate professional summary using summary-agent
-        try:
-            eligibility_assessment = application_data.get('eligibility_assessment', decision)
-            
-            user_message = f"""## APPLICATION DATA:
+        app_id = application_data.get('application_id', 'Unknown')
+        eligibility_assessment = application_data.get('eligibility_assessment', decision)
+        
+        if eligibility_assessment == 'REQUIRES_REVIEW' and app_id in decision_summaries:
+            professional_summary = decision_summaries[app_id]
+            print(f"📋 Using pre-generated summary for {app_id}")
+        else:
+            try:
+                user_message = f"""## APPLICATION DATA:
 {json.dumps(application_data, indent=2)}
 
 ## ELIGIBILITY DECISION:
@@ -120,24 +120,23 @@ Create a professional summary of this childcare subsidy decision including:
 
 ## VALIDATION FLAGS:
 {", ".join(active_flags) if active_flags else "No validation flags"}"""
-            
-            tape = DialogTape(steps=[UserStep(content=user_message)])
-            
-            for event in main_loop(self.agent, tape, self.environment):
-                if event.agent_tape:
-                    tape = event.agent_tape
-            
-            # Extract summary from tape
-            if len(tape.steps) >= 2 and hasattr(tape.steps[-2], 'reasoning'):
-                professional_summary = tape.steps[-2].reasoning
-            elif len(tape.steps) >= 1 and hasattr(tape.steps[-1], 'reasoning'):
-                professional_summary = tape.steps[-1].reasoning
-            else:
-                professional_summary = str(tape.steps[-1]) if tape.steps else analysis
                 
-        except Exception as e:
-            print(f"Summary agent error: {e}")
-            professional_summary = analysis
+                tape = DialogTape(steps=[UserStep(content=user_message)])
+                
+                for event in main_loop(self.agent, tape, self.environment):
+                    if event.agent_tape:
+                        tape = event.agent_tape
+                
+                if len(tape.steps) >= 2 and hasattr(tape.steps[-2], 'reasoning'):
+                    professional_summary = tape.steps[-2].reasoning
+                elif len(tape.steps) >= 1 and hasattr(tape.steps[-1], 'reasoning'):
+                    professional_summary = tape.steps[-1].reasoning
+                else:
+                    professional_summary = str(tape.steps[-1]) if tape.steps else analysis
+                    
+            except Exception as e:
+                print(f"Summary agent error: {e}")
+                professional_summary = analysis
         
         return {
             'analysis': professional_summary,
@@ -151,6 +150,8 @@ class MockLLMProvider(LLMInterface):
         flags_dict = asdict(application_data['validation_flags'])
         active_flags = [k for k, v in flags_dict.items() if v]
         
+        app_id = application_data.get('application_id', 'Unknown')
+        eligibility = application_data.get('eligibility_assessment', 'REVIEW')
 
         if len(active_flags) > 5:
             decision = "REVIEW"
@@ -162,14 +163,15 @@ class MockLLMProvider(LLMInterface):
             decision = "REVIEW"
             analysis = "Standard application processing required."
         
-        # Create a professional-style summary even without TapeAgents
-        app_id = application_data.get('application_id', 'Unknown')
-        income = application_data.get('household_income', 0)
-        num_children = application_data.get('num_children', 0)
-        hours = application_data.get('childcare_hours_requested', 0)
-        eligibility = application_data.get('eligibility_assessment', decision)
-        
-        professional_summary = f"""**CHILDCARE SUBSIDY DECISION SUMMARY**
+        if eligibility == 'REQUIRES_REVIEW' and app_id in decision_summaries:
+            professional_summary = decision_summaries[app_id]
+            print(f"📋 Using pre-generated summary for {app_id}")
+        else:
+            income = application_data.get('household_income', 0)
+            num_children = application_data.get('num_children', 0)
+            hours = application_data.get('childcare_hours_requested', 0)
+            
+            professional_summary = f"""**CHILDCARE SUBSIDY DECISION SUMMARY**
 
 **Case Overview:**
 Application {app_id} - Household with {num_children} child{'ren' if num_children != 1 else ''}, requesting {hours} hours/month of childcare assistance.
@@ -552,8 +554,20 @@ class SubsidyApplicationProcessor:
 processed_applications = []
 processor = SubsidyApplicationProcessor()
 
+decision_summaries = {}
+try:
+    with open('decision_summaries.json', 'r', encoding='utf-8') as f:
+        summaries_data = json.load(f)
+        for summary in summaries_data:
+            case_id = summary.get('case_id')
+            if case_id:
+                decision_summaries[case_id] = summary.get('summary', '')
+    print(f"✅ Loaded {len(decision_summaries)} decision summaries")
+except (FileNotFoundError, json.JSONDecodeError) as e:
+    print(f"⚠️  Could not load decision summaries: {e}")
+    decision_summaries = {}
 
-# Use SummaryAgentLLMProvider for enhanced summaries, fallback to MockLLMProvider
+
 if TAPEAGENTS_AVAILABLE:
     try:
         llm_provider = SummaryAgentLLMProvider()
@@ -570,6 +584,27 @@ chatbot = ChatbotInterface(llm_provider)
 
 app = Flask(__name__)
 app.secret_key = 'subsidy_review_app_2025'
+
+def markdown_to_html(text):
+    if not text:
+        return text
+    
+    text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'\*(.*?)\*', r'<em>\1</em>', text)
+    text = re.sub(r'^#{1,6}\s+(.*?)$', r'<h3>\1</h3>', text, flags=re.MULTILINE)
+    text = re.sub(r'^•\s+(.*?)$', r'<li>\1</li>', text, flags=re.MULTILINE)
+    text = re.sub(r'^-\s+(.*?)$', r'<li>\1</li>', text, flags=re.MULTILINE)
+    
+    if '<li>' in text:
+        text = re.sub(r'(<li>.*?</li>)', r'<ul>\1</ul>', text, flags=re.DOTALL)
+        text = re.sub(r'</ul>\s*<ul>', '', text)
+    
+    text = text.replace('\n\n', '<br><br>')
+    text = text.replace('\n', '<br>')
+    
+    return text
+
+app.jinja_env.filters['markdown_to_html'] = markdown_to_html
 
 def save_processing_results():
     output_file = "processed_applications.json"
@@ -601,6 +636,12 @@ def load_and_process_applications():
         processed_applications = processor.process_all_applications(applications)
         print(f"Loaded and processed {len(processed_applications)} applications")
         
+        for app in processed_applications:
+            if app.eligibility_assessment == 'REQUIRES_REVIEW' and app.application_id in decision_summaries:
+                app.llm_analysis = decision_summaries[app.application_id]
+                app.llm_decision = "REVIEW"
+                app.llm_reasoning = "Summary generated using AI decision support system"
+                print(f"📋 Applied pre-generated summary to {app.application_id}")
 
         save_processing_results()
         
@@ -898,6 +939,10 @@ DASHBOARD_TEMPLATE = '''
             background: #ff3b30;
             color: white;
         }
+        .status-summary {
+            background: #007aff;
+            color: white;
+        }
         .flags {
             margin-top: 12px;
         }
@@ -949,6 +994,8 @@ DASHBOARD_TEMPLATE = '''
                 <span class="status-badge status-approved">✅ Approved</span>
             {% elif app.reviewer_decision == 'REJECTED' %}
                 <span class="status-badge status-rejected">❌ Rejected</span>
+            {% elif app.llm_analysis %}
+                <span class="status-badge status-summary">🤖 AI Summary Ready</span>
             {% else %}
                 <span class="status-badge status-review">⏳ Pending Review</span>
             {% endif %}
@@ -1173,17 +1220,12 @@ DETAIL_TEMPLATE = '''
         </div>
 
         <div class="section">
-            <h2>Eligibility Assessment</h2>
-            <div class="field-value">{{ application.eligibility_assessment }}</div>
-        </div>
-
-        <div class="section">
             <h2>AI-Generated Summary</h2>
             {% if application.llm_analysis %}
                 <div class="llm-analysis-result">
                     <div class="field">
                         <div class="field-label">Professional Summary</div>
-                        <div class="field-value summary-content">{{ application.llm_analysis }}</div>
+                        <div class="field-value summary-content">{{ application.llm_analysis | markdown_to_html | safe }}</div>
                     </div>
                     {% if application.llm_decision %}
                     <div class="field">
@@ -1206,7 +1248,6 @@ DETAIL_TEMPLATE = '''
                     🤖 Generate AI Summary
                 </button>
                 <div id="llm-results" style="display: none; margin-top: 16px;">
-                    <!-- LLM results will be populated here -->
                 </div>
             {% endif %}
         </div>
@@ -1699,7 +1740,6 @@ DETAIL_TEMPLATE = '''
             border: 1px solid #d4e6ff;
         }
         .summary-content {
-            white-space: pre-wrap;
             line-height: 1.6;
             font-size: 14px;
             background: white;
@@ -1709,6 +1749,23 @@ DETAIL_TEMPLATE = '''
             max-height: 400px;
             overflow-y: auto;
         }
+        .summary-content h3 {
+            margin: 16px 0 8px 0;
+            color: #1d1d1f;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .summary-content ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        .summary-content li {
+            margin: 4px 0;
+        }
+        .summary-content strong {
+            color: #1d1d1f;
+            font-weight: 600;
+        }
     </style>
 </body>
 </html>
@@ -1716,8 +1773,8 @@ DETAIL_TEMPLATE = '''
 
 def main():
     load_and_process_applications()
-    print("Starting web application on http://localhost:8081")
-    app.run(debug=True, host='0.0.0.0', port=8081)
+    print("Starting web application on http://localhost:8082")
+    app.run(debug=True, host='0.0.0.0', port=8082)
 
 if __name__ == "__main__":
     main()
