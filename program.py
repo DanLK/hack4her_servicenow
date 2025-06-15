@@ -12,10 +12,10 @@ from abc import ABC, abstractmethod
 TAPEAGENTS_AVAILABLE = False
 try:
     sys.path.append(os.path.abspath('tapeagents'))
-    from tapeagents.llms import OpenrouterLLM
+    from tapeagents.llms import OpenrouterLLM, LLMOutput
     from tapeagents.agent import Agent
-    from tapeagents.core import Prompt
-    from tapeagents.dialog_tape import DialogTape, UserStep
+    from tapeagents.core import Prompt, PartialStep
+    from tapeagents.dialog_tape import DialogTape, UserStep, AssistantStep, SystemStep
     from tapeagents.orchestrator import main_loop
     from tapeagents.environment import ToolCollectionEnvironment
     from tapeagents.tools.calculator import Calculator
@@ -216,10 +216,100 @@ This summary was generated using automated decision support tools. Manual review
         
         return '\n'.join(result)
 
+if TAPEAGENTS_AVAILABLE:
+    class ChildcareSupportAgent(Agent[DialogTape]):
+        
+        def make_prompt(self, tape: DialogTape):
+            return Prompt(messages=[{"role": "system", "content": tape.steps[0].content}] + [
+                {"role": "user" if isinstance(step, UserStep) else "assistant", "content": step.content}
+                for step in tape.steps[1:]
+            ])
+            
+        def generate_steps(self, tape: DialogTape, llm_stream):
+            buffer = []
+            for event in llm_stream:
+                if event.chunk:
+                    buffer.append(event.chunk)
+                    yield PartialStep(step=AssistantStep(content="".join(buffer)))
+                elif event.output:
+                    yield AssistantStep(content=event.output.content or "")
+                    return
+                else:
+                    raise ValueError(f"Unknown event type from LLM: {event}")
+
+        def make_llm_output(self, tape: DialogTape, index: int):
+            step = tape.steps[index]
+            if not isinstance(step, AssistantStep):
+                raise ValueError("Expected AssistantStep")
+            return LLMOutput(content=step.content)
+
 class ChatbotInterface:
     
     def __init__(self, llm_provider: LLMInterface):
         self.llm_provider = llm_provider
+        self.enhanced_agent = None
+        self.conversation_tape = None
+        
+        if TAPEAGENTS_AVAILABLE:
+            try:
+                self._initialize_enhanced_chatbot()
+            except Exception as e:
+                print(f"⚠️  Could not initialize enhanced chatbot: {e}")
+    
+    def _initialize_enhanced_chatbot(self):
+        if not TAPEAGENTS_AVAILABLE:
+            return
+            
+        api_key = "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"
+        llm = OpenrouterLLM(
+            model_name="meta-llama/llama-3.3-70b-instruct:free",
+            api_token=api_key,
+            parameters={"temperature": 0.1},
+        )
+        
+        try:
+            self.enhanced_agent = ChildcareSupportAgent.create(llm, name="childcare_agent")
+        except Exception as e:
+            print(f"Failed to create ChildcareSupportAgent: {e}")
+            self.enhanced_agent = None
+        
+        try:
+            with open("Synthetic Childcare Subsidy Regulation.md", "r") as f:
+                regulation = f.read()
+        except FileNotFoundError:
+            regulation = "No regulation file found"
+        
+        try:
+            with open("summaryoutput.txt", "r") as f:
+                summary = f.read()
+        except FileNotFoundError:
+            summary = "No summary file found"
+        
+        flag_guide = """
+Childcare Application Flags:
+- income_threshold_exceeded: Income exceeds 75th percentile threshold
+- missing_required_fields: Required application fields are incomplete
+- employment_status_invalid: Employment status does not match accepted categories
+- child_age_inconsistency: Child age information is inconsistent or exceeds program limits
+- high_hours_request: Requested childcare hours exceed standard thresholds
+- documentation_incomplete: Supporting documentation is missing or insufficient
+- inconsistent_data_format: Data format inconsistencies detected in application
+
+Use this guide to explain flags to municipality workers.
+"""
+        
+        system_content = (
+            "You are a childcare support assistant for municipality workers reviewing applications. "
+            "You explain application flags and decisions made by an external deterministic program. " + 
+            flag_guide +
+            f"These are the regulations used for the decision making: {regulation} " +
+            f"And this is the summary of the decisions for several applications: {summary}"
+        )
+        
+        self.conversation_tape = DialogTape(
+            context=None,
+            steps=[SystemStep(content=system_content)]
+        )
     
     def get_application_summary(self, application_id: str) -> str:
         app = None
@@ -246,7 +336,32 @@ class ChatbotInterface:
         return summary
     
     def process_user_query(self, query: str, application_id: str = None) -> str:
-
+        if self.enhanced_agent and self.conversation_tape:
+            try:
+                context = ""
+                if application_id:
+                    app_summary = self.get_application_summary(application_id)
+                    context = f"Context for application {application_id}: {app_summary}\n\n"
+                
+                full_query = context + query
+                self.conversation_tape = self.conversation_tape.append(UserStep(content=full_query))
+                
+                response_content = ""
+                for event in self.enhanced_agent.run(self.conversation_tape):
+                    if event.final_tape:
+                        self.conversation_tape = event.final_tape
+                        response_content = self.conversation_tape.steps[-1].content
+                        break
+                
+                return response_content if response_content else self._fallback_query_processing(query, application_id)
+                
+            except Exception as e:
+                print(f"Enhanced chatbot error: {e}")
+                return self._fallback_query_processing(query, application_id)
+        else:
+            return self._fallback_query_processing(query, application_id)
+    
+    def _fallback_query_processing(self, query: str, application_id: str = None) -> str:
         query_lower = query.lower()
         
         if application_id:
@@ -256,11 +371,31 @@ class ChatbotInterface:
                 return self._get_flag_details(application_id)
             elif "decision" in query_lower or "recommend" in query_lower:
                 return self._get_decision_reasoning(application_id)
+            elif "explain" in query_lower:
+                app_summary = self.get_application_summary(application_id)
+                return f"{app_summary}\n\nThis application requires manual review by a municipality worker to determine final eligibility."
         
         if "total" in query_lower or "count" in query_lower:
             return f"Currently processing {len(processed_applications)} applications."
+        elif "help" in query_lower:
+            return """I can help you with:
+- Application summaries: Ask for "summary of [APPLICATION_ID]"
+- Flag explanations: Ask about "flags for [APPLICATION_ID]"
+- Decision reasoning: Ask about "decision for [APPLICATION_ID]"
+- General statistics: Ask about "total applications"
+- Application analysis: Provide an application ID for specific details"""
+        elif "regulation" in query_lower or "rule" in query_lower:
+            return "Applications are evaluated based on the Childcare Subsidy Access Regulation (CSAR) - 2025, considering factors like household income, employment status, number of children, and childcare hours requested."
+        elif "flag" in query_lower and not application_id:
+            return """Common validation flags include:
+- Income Threshold Exceeded: Household income exceeds 75th percentile
+- Missing Required Fields: Incomplete application data
+- Employment Status Invalid: Employment status doesn't match accepted categories
+- Child Age Inconsistency: Child age information is inconsistent or exceeds limits
+- High Hours Request: Requested childcare hours exceed standard thresholds
+- Documentation Incomplete: Missing supporting documents"""
         
-        return "I can help you analyze specific applications. Please provide an application ID or ask about overall statistics."
+        return "I can help you analyze specific applications. Please provide an application ID or ask about overall statistics. Type 'help' for more options."
     
     def _get_flag_details(self, application_id: str) -> str:
         app = None
