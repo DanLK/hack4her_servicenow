@@ -36,7 +36,7 @@ class SummaryAgentLLMProvider(LLMInterface):
         if not TAPEAGENTS_AVAILABLE:
             raise ImportError("TapeAgents library is not available")
             
-        api_key = "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"
+        api_key = "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"
         self.llm = OpenrouterLLM(
             model_name="meta-llama/llama-3.3-70b-instruct:free",
             api_token=api_key,
@@ -283,7 +283,7 @@ class ChatbotInterface:
         if not TAPEAGENTS_AVAILABLE:
             return
             
-        api_key = "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"
+        api_key = "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"
         llm = OpenrouterLLM(
             model_name="meta-llama/llama-3.3-70b-instruct:free",
             api_token=api_key,
@@ -358,17 +358,43 @@ Use this guide to explain flags to municipality workers.
         try:
             import sys
             import os
-            sys.path.append(os.path.abspath('tapeagents'))
             
+            # Try different possible paths for tapeagents
+            possible_paths = [
+                os.path.abspath('tapeagents'),
+                os.path.abspath('../tapeagents'),
+                os.path.abspath('./tapeagents'),
+                '/usr/local/lib/python3.*/site-packages',
+                '/opt/conda/lib/python3.*/site-packages'
+            ]
+            
+            for path in possible_paths:
+                if path not in sys.path:
+                    sys.path.append(path)
+                    print(f"🔍 Added to path: {path}")
+            
+            print("🔍 Current Python path:")
+            for p in sys.path[-5:]:
+                print(f"  - {p}")
+            
+            # Try importing step by step
+            print("🔍 Trying to import tapeagents modules...")
             from tapeagents.llms import OpenrouterLLM, LLMOutput
+            print("✅ Imported OpenrouterLLM, LLMOutput")
+            
             from tapeagents.agent import Agent
+            print("✅ Imported Agent")
+            
             from tapeagents.core import Prompt, PartialStep
+            print("✅ Imported Prompt, PartialStep")
+            
             from tapeagents.dialog_tape import DialogTape, UserStep, AssistantStep, SystemStep
+            print("✅ Imported DialogTape classes")
             
-            print("✅ Successfully imported tapeagents modules")
+            # Create LLM and test it first
+            api_key = "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"
+            print(f"🔍 Using API key: {api_key[:20]}...")
             
-            # Create LLM
-            api_key = "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"
             llm = OpenrouterLLM(
                 model_name="meta-llama/llama-3.3-70b-instruct:free",
                 api_token=api_key,
@@ -376,79 +402,82 @@ Use this guide to explain flags to municipality workers.
             )
             print("✅ Created OpenrouterLLM instance")
             
-            # Define the agent class locally
-            class LocalChildcareSupportAgent(Agent[DialogTape]):
-                def make_prompt(self, tape: DialogTape):
-                    messages = []
-                    for step in tape.steps:
-                        if isinstance(step, SystemStep):
-                            messages.append({"role": "system", "content": step.content})
-                        elif isinstance(step, UserStep):
-                            messages.append({"role": "user", "content": step.content})
-                        elif isinstance(step, AssistantStep):
-                            messages.append({"role": "assistant", "content": step.content})
-                    return Prompt(messages=messages)
-                    
-                def generate_steps(self, tape: DialogTape, llm_stream):
-                    buffer = []
-                    for event in llm_stream:
-                        if event.chunk:
-                            buffer.append(event.chunk)
-                            yield PartialStep(step=AssistantStep(content="".join(buffer)))
-                        elif event.output:
-                            final_content = event.output.content or "".join(buffer)
-                            yield AssistantStep(content=final_content)
-                            return
-                        else:
-                            raise ValueError(f"Unknown event type from LLM: {event}")
-
-                def make_llm_output(self, tape: DialogTape, index: int):
-                    step = tape.steps[index]
-                    if not isinstance(step, AssistantStep):
-                        raise ValueError("Expected AssistantStep")
-                    return LLMOutput(content=step.content)
-            
-            # Create agent
-            self.enhanced_agent = LocalChildcareSupportAgent.create(llm, name="childcare_agent")
-            print("✅ Created LocalChildcareSupportAgent")
-            
-            # Test the LLM directly
-            print("🧪 Testing LLM directly...")
-            test_prompt = Prompt(messages=[{"role": "user", "content": "Hello, can you help me with childcare applications?"}])
+            # Test the LLM directly first
+            print("🧪 Testing LLM directly before creating agent...")
+            test_prompt = Prompt(messages=[{"role": "user", "content": "Hello, respond with 'LLM is working!'"}])
             test_stream = llm.stream(test_prompt)
             test_response = ""
+            event_count = 0
             for event in test_stream:
-                if event.output:
+                event_count += 1
+                print(f"🔍 LLM event {event_count}: {type(event)}")
+                if hasattr(event, 'chunk') and event.chunk:
+                    test_response += event.chunk
+                    print(f"🔍 Chunk: {event.chunk}")
+                elif hasattr(event, 'output') and event.output:
                     test_response = event.output.content
+                    print(f"🔍 Final output: {event.output.content}")
                     break
-            print(f"🧪 Direct LLM test response: {test_response[:100]}...")
+            print(f"🧪 Direct LLM test response: {test_response}")
             
-            # Load files and create conversation tape
-            try:
-                with open("Synthetic Childcare Subsidy Regulation.md", "r") as f:
-                    regulation = f.read()
-            except FileNotFoundError:
-                regulation = "No regulation file found"
+            if not test_response:
+                raise Exception("LLM test failed - no response received")
             
-            try:
-                with open("summaryoutput.txt", "r") as f:
-                    summary = f.read()
-            except FileNotFoundError:
-                summary = "No summary file found"
+            # Store the working LLM for direct use
+            self.direct_llm = llm
+            print("✅ Stored direct LLM instance")
             
-            system_content = (
-                "You are a helpful childcare support assistant for municipality workers reviewing childcare subsidy applications. "
-                "Your role is to explain application flags, decisions, and regulations in a clear and helpful manner. "
-                "Always provide detailed, informative responses to help municipality workers understand the childcare subsidy system. "
-                f"\n\nRegulations: {regulation[:500]}..." +
-                f"\n\nDecision summaries available: {summary[:200]}..."
+            # Try to create a simple agent
+            print("🔍 Creating minimal agent...")
+            
+            class SimpleChatAgent:
+                def __init__(self, llm):
+                    self.llm = llm
+                
+                def respond(self, user_message, system_context="You are a helpful assistant."):
+                    messages = [
+                        {"role": "system", "content": system_context},
+                        {"role": "user", "content": user_message}
+                    ]
+                    prompt = Prompt(messages=messages)
+                    stream = self.llm.stream(prompt)
+                    
+                    response = ""
+                    for event in stream:
+                        if hasattr(event, 'chunk') and event.chunk:
+                            response += event.chunk
+                        elif hasattr(event, 'output') and event.output:
+                            response = event.output.content
+                            break
+                    return response
+            
+            self.simple_agent = SimpleChatAgent(llm)
+            print("✅ Created simple chat agent")
+            
+            # Test the simple agent
+            test_response = self.simple_agent.respond(
+                "What are childcare application flags?",
+                "You are a childcare support assistant. Explain application flags clearly."
             )
+            print(f"🧪 Simple agent test response: {test_response[:100]}...")
             
-            self.conversation_tape = DialogTape(
-                context=None,
-                steps=[SystemStep(content=system_content)]
-            )
-            print("✅ Forced initialization completed successfully")
+            if test_response and len(test_response) > 10:
+                print("✅ Simple agent is working! Using this instead of complex agent.")
+                self.enhanced_agent = self.simple_agent
+                
+                # Create a simple conversation state
+                self.conversation_history = []
+                system_content = (
+                    "You are a helpful childcare support assistant for municipality workers. "
+                    "Explain application flags, decisions, and regulations clearly."
+                )
+                self.system_context = system_content
+                
+                print("✅ Forced initialization with simple agent completed successfully")
+                return
+            
+            # If we get here, the simple agent didn't work, so the original error stands
+            raise Exception("Simple agent test failed")
             
         except Exception as e:
             print(f"❌ Forced initialization failed: {e}")
@@ -491,54 +520,89 @@ Use this guide to explain flags to municipality workers.
     
     def process_user_query(self, query: str, application_id: str = None) -> str:
         print(f"🔍 Debug: enhanced_agent exists: {self.enhanced_agent is not None}")
-        print(f"🔍 Debug: conversation_tape exists: {self.conversation_tape is not None}")
+        print(f"🔍 Debug: enhanced_agent type: {type(self.enhanced_agent)}")
         
-        if self.enhanced_agent and self.conversation_tape:
+        if self.enhanced_agent:
             try:
                 print(f"🤖 Processing query with enhanced agent: {query[:50]}...")
                 
-                self._reset_conversation_if_needed()
+                # Check if it's our simple agent or complex agent
+                if hasattr(self.enhanced_agent, 'respond'):
+                    # Simple agent
+                    print("🔍 Using simple agent...")
+                    
+                    context = ""
+                    if application_id:
+                        app_summary = self.get_application_summary(application_id)
+                        context = f"Context for application {application_id}: {app_summary}\n\n"
+                    
+                    full_query = context + query
+                    system_context = getattr(self, 'system_context', 
+                        "You are a helpful childcare support assistant for municipality workers. "
+                        "Explain application flags, decisions, and regulations clearly."
+                    )
+                    
+                    print(f"🔍 Calling simple agent with query: {full_query[:100]}...")
+                    response_content = self.enhanced_agent.respond(full_query, system_context)
+                    print(f"✅ Simple agent response: {len(response_content)} chars")
+                    print(f"🔍 Response preview: {response_content[:100]}...")
+                    
+                    if response_content and response_content.strip():
+                        return response_content
+                    else:
+                        print("⚠️  Empty response from simple agent, using fallback")
+                        return self._fallback_query_processing(query, application_id)
                 
-                context = ""
-                if application_id:
-                    app_summary = self.get_application_summary(application_id)
-                    context = f"Context for application {application_id}: {app_summary}\n\n"
+                elif hasattr(self.enhanced_agent, 'run') and self.conversation_tape:
+                    # Complex agent with conversation tape
+                    print("🔍 Using complex agent with conversation tape...")
+                    
+                    self._reset_conversation_if_needed()
+                    
+                    context = ""
+                    if application_id:
+                        app_summary = self.get_application_summary(application_id)
+                        context = f"Context for application {application_id}: {app_summary}\n\n"
+                    
+                    full_query = context + query
+                    print(f"🔍 Full query to LLM: {full_query[:100]}...")
+                    
+                    self.conversation_tape = self.conversation_tape.append(UserStep(content=full_query))
+                    print(f"🔍 Tape has {len(self.conversation_tape.steps)} steps")
+                    
+                    new_tape = None
+                    response_content = ""
+                    event_count = 0
+                    
+                    print("🔄 Starting LLM generation...")
+                    for event in self.enhanced_agent.run(self.conversation_tape):
+                        event_count += 1
+                        print(f"🔍 Event {event_count}: {type(event).__name__}")
+                        if event.partial_step:
+                            response_content = event.partial_step.step.content
+                            print(f"🔍 Partial response: {response_content[:50]}...")
+                        if event.final_tape:
+                            new_tape = event.final_tape
+                            print("🔍 Got final tape")
+                    
+                    print(f"📊 Processed {event_count} events from LLM")
+                    
+                    if new_tape:
+                        self.conversation_tape = new_tape
+                        last_step = self.conversation_tape.steps[-1]
+                        if hasattr(last_step, 'content'):
+                            response_content = last_step.content
+                            print(f"✅ Final response from enhanced agent: {len(response_content)} chars")
+                            print(f"🔍 Response preview: {response_content[:100]}...")
+                    
+                    if response_content and response_content.strip():
+                        return response_content
+                    else:
+                        print("⚠️  Empty response from enhanced agent, using fallback")
+                        return self._fallback_query_processing(query, application_id)
                 
-                full_query = context + query
-                print(f"🔍 Full query to LLM: {full_query[:100]}...")
-                
-                self.conversation_tape = self.conversation_tape.append(UserStep(content=full_query))
-                print(f"🔍 Tape has {len(self.conversation_tape.steps)} steps")
-                
-                new_tape = None
-                response_content = ""
-                event_count = 0
-                
-                print("🔄 Starting LLM generation...")
-                for event in self.enhanced_agent.run(self.conversation_tape):
-                    event_count += 1
-                    print(f"🔍 Event {event_count}: {type(event).__name__}")
-                    if event.partial_step:
-                        response_content = event.partial_step.step.content
-                        print(f"🔍 Partial response: {response_content[:50]}...")
-                    if event.final_tape:
-                        new_tape = event.final_tape
-                        print("🔍 Got final tape")
-                
-                print(f"📊 Processed {event_count} events from LLM")
-                
-                if new_tape:
-                    self.conversation_tape = new_tape
-                    last_step = self.conversation_tape.steps[-1]
-                    if hasattr(last_step, 'content'):
-                        response_content = last_step.content
-                        print(f"✅ Final response from enhanced agent: {len(response_content)} chars")
-                        print(f"🔍 Response preview: {response_content[:100]}...")
-                
-                if response_content and response_content.strip():
-                    return response_content
                 else:
-                    print("⚠️  Empty response from enhanced agent, using fallback")
+                    print("⚠️  Enhanced agent exists but doesn't have expected methods")
                     return self._fallback_query_processing(query, application_id)
                 
             except Exception as e:
@@ -547,7 +611,7 @@ Use this guide to explain flags to municipality workers.
                 traceback.print_exc()
                 return self._fallback_query_processing(query, application_id)
         else:
-            print(f"ℹ️  Using fallback query processing (enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None})")
+            print(f"ℹ️  Using fallback query processing (no enhanced agent)")
             return self._fallback_query_processing(query, application_id)
     
     def _fallback_query_processing(self, query: str, application_id: str = None) -> str:
@@ -1092,29 +1156,58 @@ def test_direct_llm():
         data = request.get_json()
         test_query = data.get('query', 'Hello, can you help me?')
         
-        # Create a fresh conversation tape for this test
-        system_content = "You are a helpful childcare support assistant. Respond naturally to user questions."
-        tape = DialogTape(context=None, steps=[SystemStep(content=system_content)])
-        tape = tape.append(UserStep(content=test_query))
+        # Check if it's our simple agent or complex agent
+        if hasattr(chatbot.enhanced_agent, 'respond'):
+            # Simple agent
+            system_content = "You are a helpful childcare support assistant. Respond naturally to user questions about childcare applications and flags."
+            response_content = chatbot.enhanced_agent.respond(test_query, system_content)
+            
+            return jsonify({
+                "query": test_query,
+                "response": response_content,
+                "agent_type": "simple",
+                "success": bool(response_content)
+            })
         
-        response_content = ""
-        event_count = 0
+        elif hasattr(chatbot.enhanced_agent, 'run'):
+            # Complex agent
+            if not hasattr(DialogTape, '__init__'):
+                return jsonify({
+                    "error": "DialogTape not available for complex agent",
+                    "agent_type": "complex_failed"
+                }), 400
+            
+            system_content = "You are a helpful childcare support assistant. Respond naturally to user questions."
+            tape = DialogTape(context=None, steps=[SystemStep(content=system_content)])
+            tape = tape.append(UserStep(content=test_query))
+            
+            response_content = ""
+            event_count = 0
+            
+            for event in chatbot.enhanced_agent.run(tape):
+                event_count += 1
+                if event.final_tape:
+                    final_tape = event.final_tape
+                    last_step = final_tape.steps[-1]
+                    if hasattr(last_step, 'content'):
+                        response_content = last_step.content
+                    break
+            
+            return jsonify({
+                "query": test_query,
+                "response": response_content,
+                "events_processed": event_count,
+                "agent_type": "complex",
+                "success": bool(response_content)
+            })
         
-        for event in chatbot.enhanced_agent.run(tape):
-            event_count += 1
-            if event.final_tape:
-                final_tape = event.final_tape
-                last_step = final_tape.steps[-1]
-                if hasattr(last_step, 'content'):
-                    response_content = last_step.content
-                break
-        
-        return jsonify({
-            "query": test_query,
-            "response": response_content,
-            "events_processed": event_count,
-            "success": bool(response_content)
-        })
+        else:
+            return jsonify({
+                "error": "Unknown agent type",
+                "agent_type": str(type(chatbot.enhanced_agent)),
+                "has_respond": hasattr(chatbot.enhanced_agent, 'respond'),
+                "has_run": hasattr(chatbot.enhanced_agent, 'run')
+            }), 400
         
     except Exception as e:
         import traceback
