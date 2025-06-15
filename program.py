@@ -269,8 +269,9 @@ class ChatbotInterface:
         
         try:
             self.enhanced_agent = ChildcareSupportAgent.create(llm, name="childcare_agent")
+            print("✅ ChildcareSupportAgent created successfully")
         except Exception as e:
-            print(f"Failed to create ChildcareSupportAgent: {e}")
+            print(f"❌ Failed to create ChildcareSupportAgent: {e}")
             self.enhanced_agent = None
         
         try:
@@ -310,6 +311,16 @@ Use this guide to explain flags to municipality workers.
             context=None,
             steps=[SystemStep(content=system_content)]
         )
+        print("✅ Enhanced chatbot conversation tape initialized")
+    
+    def _reset_conversation_if_needed(self):
+        if self.conversation_tape and len(self.conversation_tape.steps) > 20:
+            print("🔄 Resetting conversation tape (too many steps)")
+            system_step = self.conversation_tape.steps[0]
+            self.conversation_tape = DialogTape(
+                context=None,
+                steps=[system_step]
+            )
     
     def get_application_summary(self, application_id: str) -> str:
         app = None
@@ -338,6 +349,10 @@ Use this guide to explain flags to municipality workers.
     def process_user_query(self, query: str, application_id: str = None) -> str:
         if self.enhanced_agent and self.conversation_tape:
             try:
+                print(f"🤖 Processing query with enhanced agent: {query[:50]}...")
+                
+                self._reset_conversation_if_needed()
+                
                 context = ""
                 if application_id:
                     app_summary = self.get_application_summary(application_id)
@@ -346,19 +361,35 @@ Use this guide to explain flags to municipality workers.
                 full_query = context + query
                 self.conversation_tape = self.conversation_tape.append(UserStep(content=full_query))
                 
+                new_tape = None
                 response_content = ""
+                event_count = 0
+                
                 for event in self.enhanced_agent.run(self.conversation_tape):
+                    event_count += 1
+                    if event.partial_step:
+                        response_content = event.partial_step.step.content
                     if event.final_tape:
-                        self.conversation_tape = event.final_tape
-                        response_content = self.conversation_tape.steps[-1].content
-                        break
+                        new_tape = event.final_tape
+                
+                print(f"📊 Processed {event_count} events from LLM")
+                
+                if new_tape:
+                    self.conversation_tape = new_tape
+                    last_step = self.conversation_tape.steps[-1]
+                    if hasattr(last_step, 'content'):
+                        response_content = last_step.content
+                        print(f"✅ Got response from enhanced agent: {len(response_content)} chars")
                 
                 return response_content if response_content else self._fallback_query_processing(query, application_id)
                 
             except Exception as e:
-                print(f"Enhanced chatbot error: {e}")
+                print(f"❌ Enhanced chatbot error: {e}")
+                import traceback
+                traceback.print_exc()
                 return self._fallback_query_processing(query, application_id)
         else:
+            print("ℹ️  Using fallback query processing (no enhanced agent)")
             return self._fallback_query_processing(query, application_id)
     
     def _fallback_query_processing(self, query: str, application_id: str = None) -> str:
@@ -848,6 +879,47 @@ def chatbot_query():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/chatbot/test', methods=['POST'])
+def test_chatbot():
+    try:
+        data = request.get_json()
+        test_query = data.get('query', 'Hello, can you help me understand application flags?')
+        
+        chatbot_status = {
+            "tapeagents_available": TAPEAGENTS_AVAILABLE,
+            "enhanced_agent_available": chatbot.enhanced_agent is not None,
+            "conversation_tape_available": chatbot.conversation_tape is not None
+        }
+        
+        if chatbot.enhanced_agent and chatbot.conversation_tape:
+            response = chatbot.process_user_query(test_query)
+            return jsonify({
+                "status": chatbot_status,
+                "test_query": test_query,
+                "response": response,
+                "agent_type": "enhanced"
+            })
+        else:
+            response = chatbot._fallback_query_processing(test_query)
+            return jsonify({
+                "status": chatbot_status,
+                "test_query": test_query,
+                "response": response,
+                "agent_type": "fallback"
+            })
+            
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "status": {
+                "tapeagents_available": TAPEAGENTS_AVAILABLE,
+                "enhanced_agent_available": chatbot.enhanced_agent is not None if 'chatbot' in globals() else False,
+                "conversation_tape_available": chatbot.conversation_tape is not None if 'chatbot' in globals() else False
+            }
+        }), 500
 
 @app.route('/api/review/<application_id>', methods=['POST'])
 def review_application(application_id):
@@ -1483,6 +1555,9 @@ DETAIL_TEMPLATE = '''
         <div class="section">
             <h2>Chatbot Assistant</h2>
             <div class="chatbot-container">
+                <div class="chatbot-controls">
+                    <button onclick="testChatbot()" class="test-btn">🧪 Test LLM Connection</button>
+                </div>
                 <div id="chat-messages" class="chat-messages"></div>
                 <div class="chat-input-container">
                     <input type="text" id="chat-input" placeholder="Ask about this application..." class="chat-input">
@@ -1604,6 +1679,59 @@ DETAIL_TEMPLATE = '''
                 }
             } catch (error) {
                 alert('Error sending message: ' + error.message);
+            }
+        }
+
+        async function testChatbot() {
+            const messagesContainer = document.getElementById('chat-messages');
+            
+            messagesContainer.innerHTML += `
+                <div class="chat-message system-message">
+                    <strong>System:</strong> Testing LLM connection...
+                </div>
+            `;
+            
+            try {
+                const response = await fetch('/api/chatbot/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: 'Hello, can you help me understand application flags?'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message system-message">
+                            <strong>Test Results:</strong><br>
+                            TapeAgents Available: ${result.status.tapeagents_available}<br>
+                            Enhanced Agent: ${result.status.enhanced_agent_available}<br>
+                            Agent Type: ${result.agent_type}<br>
+                            <br><strong>Test Response:</strong><br>
+                            <pre>${result.response}</pre>
+                        </div>
+                    `;
+                } else {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message error-message">
+                            <strong>Test Failed:</strong> ${result.error}<br>
+                            ${result.traceback ? '<details><summary>Details</summary><pre>' + result.traceback + '</pre></details>' : ''}
+                        </div>
+                    `;
+                }
+                
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+            } catch (error) {
+                messagesContainer.innerHTML += `
+                    <div class="chat-message error-message">
+                        <strong>Test Error:</strong> ${error.message}
+                    </div>
+                `;
             }
         }
 
@@ -1900,6 +2028,28 @@ DETAIL_TEMPLATE = '''
         .summary-content strong {
             color: #1d1d1f;
             font-weight: 600;
+        }
+        .chatbot-controls {
+            margin-bottom: 12px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .test-btn {
+            background: #17a2b8;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .test-btn:hover {
+            background: #138496;
+        }
+        .system-message {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
         }
     </style>
 </body>
