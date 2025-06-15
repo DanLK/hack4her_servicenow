@@ -256,17 +256,28 @@ class ChatbotInterface:
         self.enhanced_agent = None
         self.conversation_tape = None
         
-        if TAPEAGENTS_AVAILABLE:
-            try:
-                print("🔧 Attempting to initialize enhanced chatbot...")
-                self._initialize_enhanced_chatbot()
-                print(f"🔍 After init - enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None}")
-            except Exception as e:
-                print(f"⚠️  Could not initialize enhanced chatbot: {e}")
-                import traceback
-                traceback.print_exc()
-        else:
-            print("ℹ️  TapeAgents not available, enhanced chatbot disabled")
+        print(f"🔍 TAPEAGENTS_AVAILABLE: {TAPEAGENTS_AVAILABLE}")
+        
+        # Try to initialize enhanced chatbot regardless of global flag
+        try:
+            print("🔧 Attempting to initialize enhanced chatbot...")
+            self._initialize_enhanced_chatbot_force()
+            print(f"🔍 After init - enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None}")
+        except Exception as e:
+            print(f"⚠️  Could not initialize enhanced chatbot: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # If forced initialization fails, try the original method
+            if TAPEAGENTS_AVAILABLE:
+                try:
+                    print("🔧 Trying original initialization method...")
+                    self._initialize_enhanced_chatbot()
+                    print(f"🔍 After original init - enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None}")
+                except Exception as e2:
+                    print(f"⚠️  Original initialization also failed: {e2}")
+            else:
+                print("ℹ️  TapeAgents not available globally, enhanced chatbot disabled")
     
     def _initialize_enhanced_chatbot(self):
         if not TAPEAGENTS_AVAILABLE:
@@ -341,6 +352,109 @@ Use this guide to explain flags to municipality workers.
             steps=[SystemStep(content=system_content)]
         )
         print("✅ Enhanced chatbot conversation tape initialized")
+    
+    def _initialize_enhanced_chatbot_force(self):
+        # Try to import tapeagents directly and initialize
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.abspath('tapeagents'))
+            
+            from tapeagents.llms import OpenrouterLLM, LLMOutput
+            from tapeagents.agent import Agent
+            from tapeagents.core import Prompt, PartialStep
+            from tapeagents.dialog_tape import DialogTape, UserStep, AssistantStep, SystemStep
+            
+            print("✅ Successfully imported tapeagents modules")
+            
+            # Create LLM
+            api_key = "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"
+            llm = OpenrouterLLM(
+                model_name="meta-llama/llama-3.3-70b-instruct:free",
+                api_token=api_key,
+                parameters={"temperature": 0.1},
+            )
+            print("✅ Created OpenrouterLLM instance")
+            
+            # Define the agent class locally
+            class LocalChildcareSupportAgent(Agent[DialogTape]):
+                def make_prompt(self, tape: DialogTape):
+                    messages = []
+                    for step in tape.steps:
+                        if isinstance(step, SystemStep):
+                            messages.append({"role": "system", "content": step.content})
+                        elif isinstance(step, UserStep):
+                            messages.append({"role": "user", "content": step.content})
+                        elif isinstance(step, AssistantStep):
+                            messages.append({"role": "assistant", "content": step.content})
+                    return Prompt(messages=messages)
+                    
+                def generate_steps(self, tape: DialogTape, llm_stream):
+                    buffer = []
+                    for event in llm_stream:
+                        if event.chunk:
+                            buffer.append(event.chunk)
+                            yield PartialStep(step=AssistantStep(content="".join(buffer)))
+                        elif event.output:
+                            final_content = event.output.content or "".join(buffer)
+                            yield AssistantStep(content=final_content)
+                            return
+                        else:
+                            raise ValueError(f"Unknown event type from LLM: {event}")
+
+                def make_llm_output(self, tape: DialogTape, index: int):
+                    step = tape.steps[index]
+                    if not isinstance(step, AssistantStep):
+                        raise ValueError("Expected AssistantStep")
+                    return LLMOutput(content=step.content)
+            
+            # Create agent
+            self.enhanced_agent = LocalChildcareSupportAgent.create(llm, name="childcare_agent")
+            print("✅ Created LocalChildcareSupportAgent")
+            
+            # Test the LLM directly
+            print("🧪 Testing LLM directly...")
+            test_prompt = Prompt(messages=[{"role": "user", "content": "Hello, can you help me with childcare applications?"}])
+            test_stream = llm.stream(test_prompt)
+            test_response = ""
+            for event in test_stream:
+                if event.output:
+                    test_response = event.output.content
+                    break
+            print(f"🧪 Direct LLM test response: {test_response[:100]}...")
+            
+            # Load files and create conversation tape
+            try:
+                with open("Synthetic Childcare Subsidy Regulation.md", "r") as f:
+                    regulation = f.read()
+            except FileNotFoundError:
+                regulation = "No regulation file found"
+            
+            try:
+                with open("summaryoutput.txt", "r") as f:
+                    summary = f.read()
+            except FileNotFoundError:
+                summary = "No summary file found"
+            
+            system_content = (
+                "You are a helpful childcare support assistant for municipality workers reviewing childcare subsidy applications. "
+                "Your role is to explain application flags, decisions, and regulations in a clear and helpful manner. "
+                "Always provide detailed, informative responses to help municipality workers understand the childcare subsidy system. "
+                f"\n\nRegulations: {regulation[:500]}..." +
+                f"\n\nDecision summaries available: {summary[:200]}..."
+            )
+            
+            self.conversation_tape = DialogTape(
+                context=None,
+                steps=[SystemStep(content=system_content)]
+            )
+            print("✅ Forced initialization completed successfully")
+            
+        except Exception as e:
+            print(f"❌ Forced initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise e
     
     def _reset_conversation_if_needed(self):
         if self.conversation_tape and len(self.conversation_tape.steps) > 20:
@@ -967,8 +1081,12 @@ def test_chatbot():
 
 @app.route('/api/chatbot/direct', methods=['POST'])
 def test_direct_llm():
-    if not TAPEAGENTS_AVAILABLE or not chatbot.enhanced_agent:
-        return jsonify({"error": "Enhanced chatbot not available"}), 400
+    if not chatbot.enhanced_agent:
+        return jsonify({
+            "error": "Enhanced chatbot not available", 
+            "tapeagents_available": TAPEAGENTS_AVAILABLE,
+            "enhanced_agent_exists": chatbot.enhanced_agent is not None
+        }), 400
     
     try:
         data = request.get_json()
