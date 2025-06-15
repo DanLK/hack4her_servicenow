@@ -252,9 +252,15 @@ class ChatbotInterface:
         
         if TAPEAGENTS_AVAILABLE:
             try:
+                print("🔧 Attempting to initialize enhanced chatbot...")
                 self._initialize_enhanced_chatbot()
+                print(f"🔍 After init - enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None}")
             except Exception as e:
                 print(f"⚠️  Could not initialize enhanced chatbot: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("ℹ️  TapeAgents not available, enhanced chatbot disabled")
     
     def _initialize_enhanced_chatbot(self):
         if not TAPEAGENTS_AVAILABLE:
@@ -347,6 +353,9 @@ Use this guide to explain flags to municipality workers.
         return summary
     
     def process_user_query(self, query: str, application_id: str = None) -> str:
+        print(f"🔍 Debug: enhanced_agent exists: {self.enhanced_agent is not None}")
+        print(f"🔍 Debug: conversation_tape exists: {self.conversation_tape is not None}")
+        
         if self.enhanced_agent and self.conversation_tape:
             try:
                 print(f"🤖 Processing query with enhanced agent: {query[:50]}...")
@@ -359,18 +368,25 @@ Use this guide to explain flags to municipality workers.
                     context = f"Context for application {application_id}: {app_summary}\n\n"
                 
                 full_query = context + query
+                print(f"🔍 Full query to LLM: {full_query[:100]}...")
+                
                 self.conversation_tape = self.conversation_tape.append(UserStep(content=full_query))
+                print(f"🔍 Tape has {len(self.conversation_tape.steps)} steps")
                 
                 new_tape = None
                 response_content = ""
                 event_count = 0
                 
+                print("🔄 Starting LLM generation...")
                 for event in self.enhanced_agent.run(self.conversation_tape):
                     event_count += 1
+                    print(f"🔍 Event {event_count}: {type(event).__name__}")
                     if event.partial_step:
                         response_content = event.partial_step.step.content
+                        print(f"🔍 Partial response: {response_content[:50]}...")
                     if event.final_tape:
                         new_tape = event.final_tape
+                        print("🔍 Got final tape")
                 
                 print(f"📊 Processed {event_count} events from LLM")
                 
@@ -379,9 +395,14 @@ Use this guide to explain flags to municipality workers.
                     last_step = self.conversation_tape.steps[-1]
                     if hasattr(last_step, 'content'):
                         response_content = last_step.content
-                        print(f"✅ Got response from enhanced agent: {len(response_content)} chars")
+                        print(f"✅ Final response from enhanced agent: {len(response_content)} chars")
+                        print(f"🔍 Response preview: {response_content[:100]}...")
                 
-                return response_content if response_content else self._fallback_query_processing(query, application_id)
+                if response_content and response_content.strip():
+                    return response_content
+                else:
+                    print("⚠️  Empty response from enhanced agent, using fallback")
+                    return self._fallback_query_processing(query, application_id)
                 
             except Exception as e:
                 print(f"❌ Enhanced chatbot error: {e}")
@@ -389,7 +410,7 @@ Use this guide to explain flags to municipality workers.
                 traceback.print_exc()
                 return self._fallback_query_processing(query, application_id)
         else:
-            print("ℹ️  Using fallback query processing (no enhanced agent)")
+            print(f"ℹ️  Using fallback query processing (enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None})")
             return self._fallback_query_processing(query, application_id)
     
     def _fallback_query_processing(self, query: str, application_id: str = None) -> str:
