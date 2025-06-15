@@ -258,26 +258,34 @@ class ChatbotInterface:
         
         print(f"🔍 TAPEAGENTS_AVAILABLE: {TAPEAGENTS_AVAILABLE}")
         
-        # Try to initialize enhanced chatbot regardless of global flag
+        # Try the simplest possible approach - direct LLM usage
         try:
-            print("🔧 Attempting to initialize enhanced chatbot...")
-            self._initialize_enhanced_chatbot_force()
-            print(f"🔍 After init - enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None}")
+            print("🔧 Attempting simple LLM initialization...")
+            self._initialize_simple_llm()
+            print(f"🔍 After simple init - enhanced_agent: {self.enhanced_agent is not None}")
         except Exception as e:
-            print(f"⚠️  Could not initialize enhanced chatbot: {e}")
+            print(f"⚠️  Simple LLM initialization failed: {e}")
             import traceback
             traceback.print_exc()
             
-            # If forced initialization fails, try the original method
-            if TAPEAGENTS_AVAILABLE:
-                try:
-                    print("🔧 Trying original initialization method...")
-                    self._initialize_enhanced_chatbot()
-                    print(f"🔍 After original init - enhanced_agent: {self.enhanced_agent is not None}, tape: {self.conversation_tape is not None}")
-                except Exception as e2:
-                    print(f"⚠️  Original initialization also failed: {e2}")
-            else:
-                print("ℹ️  TapeAgents not available globally, enhanced chatbot disabled")
+            # If simple init fails, try the complex method
+            try:
+                print("🔧 Trying complex initialization method...")
+                self._initialize_enhanced_chatbot_force()
+                print(f"🔍 After complex init - enhanced_agent: {self.enhanced_agent is not None}")
+            except Exception as e2:
+                print(f"⚠️  Complex initialization also failed: {e2}")
+                
+                # Last resort - try with TAPEAGENTS_AVAILABLE flag
+                if TAPEAGENTS_AVAILABLE:
+                    try:
+                        print("🔧 Trying original initialization method...")
+                        self._initialize_enhanced_chatbot()
+                        print(f"🔍 After original init - enhanced_agent: {self.enhanced_agent is not None}")
+                    except Exception as e3:
+                        print(f"⚠️  All initialization methods failed: {e3}")
+                else:
+                    print("ℹ️  TapeAgents not available globally, all initialization failed")
     
     def _initialize_enhanced_chatbot(self):
         if not TAPEAGENTS_AVAILABLE:
@@ -352,6 +360,106 @@ Use this guide to explain flags to municipality workers.
             steps=[SystemStep(content=system_content)]
         )
         print("✅ Enhanced chatbot conversation tape initialized")
+    
+    def _initialize_simple_llm(self):
+        # Try the simplest possible approach using requests
+        try:
+            import requests
+            import json
+            
+            print("🔍 Testing direct API call to OpenRouter...")
+            
+            api_key = "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"
+            
+            # Test direct API call
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            data = {
+                "model": "meta-llama/llama-3.3-70b-instruct:free",
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Hello, respond with 'Direct API working!'"}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 100
+            }
+            
+            print(f"🔍 Making API call to {url}")
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            print(f"🔍 API response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                test_response = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                print(f"🧪 Direct API test response: {test_response}")
+                
+                if test_response:
+                    # Create a simple agent using direct API calls
+                    class DirectAPIAgent:
+                        def __init__(self, api_key):
+                            self.api_key = api_key
+                            self.url = "https://openrouter.ai/api/v1/chat/completions"
+                            self.headers = {
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json"
+                            }
+                        
+                        def respond(self, user_message, system_context="You are a helpful assistant."):
+                            data = {
+                                "model": "meta-llama/llama-3.3-70b-instruct:free",
+                                "messages": [
+                                    {"role": "system", "content": system_context},
+                                    {"role": "user", "content": user_message}
+                                ],
+                                "temperature": 0.1,
+                                "max_tokens": 500
+                            }
+                            
+                            try:
+                                response = requests.post(self.url, headers=self.headers, json=data, timeout=30)
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    return result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                                else:
+                                    print(f"❌ API error: {response.status_code} - {response.text}")
+                                    return f"API Error: {response.status_code}"
+                            except Exception as e:
+                                print(f"❌ Request error: {e}")
+                                return f"Request Error: {e}"
+                    
+                    self.enhanced_agent = DirectAPIAgent(api_key)
+                    print("✅ Created DirectAPIAgent")
+                    
+                    # Test the agent
+                    test_response = self.enhanced_agent.respond(
+                        "What are childcare application flags?",
+                        "You are a childcare support assistant. Explain application flags clearly."
+                    )
+                    print(f"🧪 DirectAPIAgent test response: {test_response[:100]}...")
+                    
+                    if test_response and len(test_response) > 10 and "Error" not in test_response:
+                        self.system_context = (
+                            "You are a helpful childcare support assistant for municipality workers. "
+                            "Explain application flags, decisions, and regulations clearly."
+                        )
+                        print("✅ Simple LLM initialization completed successfully with DirectAPIAgent")
+                        return
+                    else:
+                        raise Exception("DirectAPIAgent test failed or returned error")
+                else:
+                    raise Exception("No response from direct API test")
+            else:
+                print(f"❌ API call failed: {response.status_code} - {response.text}")
+                raise Exception(f"API call failed with status {response.status_code}")
+        
+        except Exception as e:
+            print(f"❌ Simple LLM initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise e
     
     def _initialize_enhanced_chatbot_force(self):
         # Try to import tapeagents directly and initialize
@@ -1145,12 +1253,19 @@ def test_chatbot():
 
 @app.route('/api/chatbot/direct', methods=['POST'])
 def test_direct_llm():
+    print(f"🔍 Direct test called - enhanced_agent exists: {chatbot.enhanced_agent is not None}")
+    print(f"🔍 Enhanced agent type: {type(chatbot.enhanced_agent) if chatbot.enhanced_agent else 'None'}")
+    
     if not chatbot.enhanced_agent:
-        return jsonify({
+        error_response = {
             "error": "Enhanced chatbot not available", 
             "tapeagents_available": TAPEAGENTS_AVAILABLE,
-            "enhanced_agent_exists": chatbot.enhanced_agent is not None
-        }), 400
+            "enhanced_agent_exists": chatbot.enhanced_agent is not None,
+            "chatbot_exists": 'chatbot' in globals(),
+            "debug_info": f"chatbot type: {type(chatbot)}"
+        }
+        print(f"❌ Returning 400 error: {error_response}")
+        return jsonify(error_response), 400
     
     try:
         data = request.get_json()
@@ -1215,6 +1330,70 @@ def test_direct_llm():
             "error": str(e),
             "traceback": traceback.format_exc()
         }), 500
+
+@app.route('/api/chatbot/raw-test', methods=['POST'])
+def test_raw_api():
+    try:
+        import requests
+        
+        print("🔍 Testing raw API call from endpoint...")
+        
+        api_key = "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"
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        data = request.get_json()
+        test_query = data.get('query', 'Hello, can you help me with childcare applications?')
+        
+        payload = {
+            "model": "meta-llama/llama-3.3-70b-instruct:free",
+            "messages": [
+                {"role": "system", "content": "You are a helpful childcare support assistant for municipality workers. Explain application flags and regulations clearly."},
+                {"role": "user", "content": test_query}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 300
+        }
+        
+        print(f"🔍 Making raw API call with query: {test_query}")
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        print(f"🔍 Raw API response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            result = response.json()
+            ai_response = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+            print(f"✅ Raw API success: {ai_response[:100]}...")
+            
+            return jsonify({
+                "success": True,
+                "query": test_query,
+                "response": ai_response,
+                "status_code": response.status_code,
+                "method": "raw_api"
+            })
+        else:
+            error_text = response.text
+            print(f"❌ Raw API failed: {response.status_code} - {error_text}")
+            
+            return jsonify({
+                "success": False,
+                "error": f"API Error: {response.status_code}",
+                "details": error_text,
+                "status_code": response.status_code
+            }), 400
+            
+    except Exception as e:
+        import traceback
+        error_details = {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+        print(f"❌ Raw API test exception: {error_details}")
+        return jsonify(error_details), 500
 
 @app.route('/api/review/<application_id>', methods=['POST'])
 def review_application(application_id):
@@ -1853,6 +2032,7 @@ DETAIL_TEMPLATE = '''
                 <div class="chatbot-controls">
                     <button onclick="testChatbot()" class="test-btn">🧪 Test LLM Connection</button>
                     <button onclick="testDirectLLM()" class="test-btn">⚡ Test Direct LLM</button>
+                    <button onclick="testRawAPI()" class="test-btn">🌐 Test Raw API</button>
                 </div>
                 <div id="chat-messages" class="chat-messages"></div>
                 <div class="chat-input-container">
@@ -2078,6 +2258,61 @@ DETAIL_TEMPLATE = '''
                 messagesContainer.innerHTML += `
                     <div class="chat-message error-message">
                         <strong>Direct Test Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function testRawAPI() {
+            const messagesContainer = document.getElementById('chat-messages');
+            
+            messagesContainer.innerHTML += `
+                <div class="chat-message system-message">
+                    <strong>Raw API Test:</strong> Testing direct OpenRouter API call...
+                </div>
+            `;
+            
+            try {
+                const response = await fetch('/api/chatbot/raw-test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: 'What are childcare application flags and what do they mean?'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message system-message">
+                            <strong>Raw API Success!</strong><br>
+                            Status: ${result.status_code}<br>
+                            Method: ${result.method}<br>
+                            <br><strong>AI Response:</strong><br>
+                            <pre>${result.response}</pre>
+                        </div>
+                    `;
+                } else {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message error-message">
+                            <strong>Raw API Failed:</strong><br>
+                            Error: ${result.error}<br>
+                            Status: ${result.status_code || 'Unknown'}<br>
+                            ${result.details ? '<br>Details: ' + result.details : ''}
+                            ${result.traceback ? '<details><summary>Traceback</summary><pre>' + result.traceback + '</pre></details>' : ''}
+                        </div>
+                    `;
+                }
+                
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+            } catch (error) {
+                messagesContainer.innerHTML += `
+                    <div class="chat-message error-message">
+                        <strong>Raw API Test Error:</strong> ${error.message}
                     </div>
                 `;
             }
