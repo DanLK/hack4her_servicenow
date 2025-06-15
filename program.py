@@ -1,0 +1,1483 @@
+import json
+import hashlib
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass, asdict
+from flask import Flask, render_template_string, request, jsonify
+from abc import ABC, abstractmethod
+
+class LLMInterface(ABC):
+    
+    @abstractmethod
+    def analyze_application(self, application_data: Dict[str, Any]) -> Dict[str, str]:
+        pass
+
+class MockLLMProvider(LLMInterface):
+    
+    def analyze_application(self, application_data: Dict[str, Any]) -> Dict[str, str]:
+        flags_dict = asdict(application_data['validation_flags'])
+        active_flags = [k for k, v in flags_dict.items() if v]
+        
+
+        if len(active_flags) > 5:
+            decision = "REVIEW"
+            analysis = f"Application requires human review due to multiple validation issues: {', '.join(active_flags[:3])}..."
+        elif any(flag in ['income_threshold_exceeded', 'missing_required_fields'] for flag in active_flags):
+            decision = "REVIEW"
+            analysis = "Application has critical issues that require careful review."
+        else:
+            decision = "REVIEW"
+            analysis = "Standard application processing required."
+        
+        return {
+            'analysis': analysis,
+            'decision': decision,
+            'reasoning': f"Based on validation flags: {', '.join(active_flags) if active_flags else 'No major issues detected'}"
+        }
+
+class ChatbotInterface:
+    
+    def __init__(self, llm_provider: LLMInterface):
+        self.llm_provider = llm_provider
+    
+    def get_application_summary(self, application_id: str) -> str:
+        app = None
+        for processed_app in processed_applications:
+            if processed_app.application_id == application_id:
+                app = processed_app
+                break
+        
+        if not app:
+            return "Application not found."
+        
+        flags_dict = asdict(app.validation_flags)
+        active_flags = [k.replace('_', ' ').title() for k, v in flags_dict.items() if v]
+        
+        summary = f"""Application {app.application_id} Summary:
+- Household Income: ${app.household_income:,}
+- Children: {app.num_children} (ages: {', '.join(map(str, app.child_ages)) if app.child_ages else 'N/A'})
+- Employment: {app.employment_status.title()}
+- Housing: {app.housing_situation.replace('_', ' ').title()}
+- Hours Requested: {app.childcare_hours_requested}/month
+- Active Flags: {', '.join(active_flags) if active_flags else 'None'}
+- LLM Analysis: {app.llm_analysis or 'Not yet analyzed'}
+- Decision: {app.llm_decision or 'Pending'}"""
+        return summary
+    
+    def process_user_query(self, query: str, application_id: str = None) -> str:
+
+        query_lower = query.lower()
+        
+        if application_id:
+            if "summary" in query_lower or "overview" in query_lower:
+                return self.get_application_summary(application_id)
+            elif "flag" in query_lower or "issue" in query_lower:
+                return self._get_flag_details(application_id)
+            elif "decision" in query_lower or "recommend" in query_lower:
+                return self._get_decision_reasoning(application_id)
+        
+        if "total" in query_lower or "count" in query_lower:
+            return f"Currently processing {len(processed_applications)} applications."
+        
+        return "I can help you analyze specific applications. Please provide an application ID or ask about overall statistics."
+    
+    def _get_flag_details(self, application_id: str) -> str:
+        app = None
+        for processed_app in processed_applications:
+            if processed_app.application_id == application_id:
+                app = processed_app
+                break
+        
+        if not app:
+            return "Application not found."
+        
+        flags_dict = asdict(app.validation_flags)
+        active_flags = [(k.replace('_', ' ').title(), v) for k, v in flags_dict.items() if v]
+        
+        if not active_flags:
+            return f"Application {application_id} has no validation flags."
+        
+        details = f"Application {application_id} validation flags:\n"
+        for flag_name, _ in active_flags:
+            details += f"- {flag_name}\n"
+        
+        return details
+    
+    def _get_decision_reasoning(self, application_id: str) -> str:
+        app = None
+        for processed_app in processed_applications:
+            if processed_app.application_id == application_id:
+                app = processed_app
+                break
+        
+        if not app:
+            return "Application not found."
+        
+        if app.llm_reasoning:
+            return f"Decision reasoning for {application_id}: {app.llm_reasoning}"
+        else:
+            return f"Application {application_id} has not been analyzed by LLM yet."
+
+@dataclass
+class ValidationFlags:
+    inconsistent_data_format: bool = False
+    missing_required_fields: bool = False
+    income_threshold_exceeded: bool = False
+    employment_status_invalid: bool = False
+    child_age_inconsistency: bool = False
+    high_hours_request: bool = False
+    documentation_incomplete: bool = False
+    human_review_required: bool = False
+
+@dataclass
+class ProcessedApplication:
+    application_id: str
+    household_income: int
+    employment_status: str
+    num_children: int
+    child_ages: List[int]
+    childcare_hours_requested: int
+    housing_situation: str
+    partner_employed: bool
+    validation_flags: ValidationFlags
+    eligibility_assessment: str
+    processed_timestamp: str
+    reviewer_notes: Optional[str] = None
+    reviewer_decision: Optional[str] = None
+    review_timestamp: Optional[str] = None
+    reviewer_reason: Optional[str] = None
+    contact_email: Optional[str] = None
+    llm_analysis: Optional[str] = None
+    llm_decision: Optional[str] = None
+    llm_reasoning: Optional[str] = None
+
+class SubsidyApplicationProcessor:
+    def __init__(self):
+        self.INCOME_THRESHOLD_PERCENTILE = 75
+        self.MAX_CHILD_AGE = 12
+        self.STANDARD_WORK_HOURS_MONTHLY = 160
+        self.HIGH_HOURS_THRESHOLD_MONTHLY  = 200
+        
+        self.VALID_EMPLOYMENT_STATUSES = {
+            'employed', 'part-time', 'self-employed', 'freelancer', 
+            'student', 'unemployed'
+        }
+        
+        self.MUNICIPAL_MEDIAN_INCOME = 45000
+        self.INCOME_THRESHOLDS = {
+            '25th_percentile': self.MUNICIPAL_MEDIAN_INCOME * 0.65,
+            '50th_percentile': self.MUNICIPAL_MEDIAN_INCOME * 1.0,
+            '75th_percentile': self.MUNICIPAL_MEDIAN_INCOME * 1.35
+        }
+        
+        self.next_id_counter = 1
+
+    def anonymize_applicant(self, name: str) -> str:
+        return hashlib.sha256(name.encode()).hexdigest()[:12]
+    
+    def _get_next_unique_id(self) -> str:
+        max_id = 0
+        
+        for app in processed_applications:
+            app_id = app.application_id
+            if app_id.startswith('A') and len(app_id) == 4 and app_id[1:].isdigit():
+                id_num = int(app_id[1:])
+                max_id = max(max_id, id_num)
+        
+        try:
+            with open('Merged Subsidy Applications.json', 'r') as f:
+                original_data = json.load(f)
+                for app in original_data:
+                    app_id = app.get('application_id', '')
+                    if app_id.startswith('A') and len(app_id) == 4 and app_id[1:].isdigit():
+                        id_num = int(app_id[1:])
+                        max_id = max(max_id, id_num)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        
+        self.next_id_counter = max(max_id + 1, self.next_id_counter)
+        next_id = f"A{self.next_id_counter:03d}"
+        self.next_id_counter += 1
+        return next_id
+
+    def normalize_application_data(self, app_data: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = {}
+        
+        application_id = app_data.get('application_id')
+        if not application_id or application_id.strip() == '':
+            application_id = self._get_next_unique_id()
+        normalized['application_id'] = application_id
+        
+        income = app_data.get('household_income', 0)
+        try:
+            normalized['household_income'] = int(income) if income is not None else 0
+        except (ValueError, TypeError):
+            normalized['household_income'] = 0
+        
+        employment_status = app_data.get('employment_status', 'unknown')
+        normalized['employment_status'] = employment_status.lower().strip() if employment_status else 'unknown'
+        
+
+        num_children_field1 = app_data.get('num_children')
+        num_children_field2 = app_data.get('number_of_children')
+        child_ages = app_data.get('child_ages', [])
+        
+        if num_children_field1 is not None:
+            try:
+                normalized['num_children'] = int(num_children_field1)
+            except (ValueError, TypeError):
+                normalized['num_children'] = len(child_ages) if child_ages else 0
+        elif num_children_field2 is not None:
+            try:
+                normalized['num_children'] = int(num_children_field2)
+            except (ValueError, TypeError):
+                normalized['num_children'] = len(child_ages) if child_ages else 0
+        else:
+            normalized['num_children'] = len(child_ages) if child_ages else 0
+            
+        normalized['child_ages'] = child_ages if isinstance(child_ages, list) else []
+        
+
+        hours_field1 = app_data.get('childcare_hours_requested')
+        hours_field2 = app_data.get('requested_hours')
+        hours = hours_field1 if hours_field1 is not None else hours_field2
+        try:
+            normalized['childcare_hours_requested'] = int(hours) if hours is not None else 0
+        except (ValueError, TypeError):
+            normalized['childcare_hours_requested'] = 0
+        
+
+        housing = app_data.get('housing_situation', 'unknown')
+        if housing == 'rental':
+            housing = 'rented'
+        elif housing == 'municipal housing':
+            housing = 'municipal_housing'
+        normalized['housing_situation'] = housing
+        
+
+        normalized['partner_employed'] = bool(app_data.get('partner_employed', False))
+        
+        return normalized
+
+    def validate_application(self, app_data: Dict[str, Any]) -> ValidationFlags:
+        flags = ValidationFlags()
+        
+        required_fields = ['household_income', 'employment_status', 'num_children', 'childcare_hours_requested']
+        if any(app_data.get(field) is None for field in required_fields):
+            flags.missing_required_fields = True
+            
+
+        if app_data.get('household_income', 0) > self.INCOME_THRESHOLDS['75th_percentile']:
+            flags.income_threshold_exceeded = True
+            
+
+        employment_status = app_data.get('employment_status', '').lower()
+        if employment_status not in self.VALID_EMPLOYMENT_STATUSES:
+            flags.employment_status_invalid = True
+            
+
+        num_children = app_data.get('num_children', 0)
+        child_ages = app_data.get('child_ages', [])
+        
+        if num_children != len(child_ages) and len(child_ages) > 0:
+            flags.child_age_inconsistency = True
+            
+
+        if any(age > self.MAX_CHILD_AGE for age in child_ages):
+            flags.child_age_inconsistency = True
+            
+
+        hours_requested = app_data.get('childcare_hours_requested', 0)
+        if hours_requested > self.HIGH_HOURS_THRESHOLD_MONTHLY:
+            flags.high_hours_request = True
+            
+
+            
+
+        original_flags = app_data.get('flags', {})
+        if original_flags.get('incomplete_docs', False):
+            flags.documentation_incomplete = True
+            
+        return flags
+
+    def assess_eligibility(self, app_data: Dict[str, Any], flags: ValidationFlags) -> str:
+        flags_dict = asdict(flags)
+        critical_flags = [
+            'missing_required_fields',
+            'income_threshold_exceeded', 
+            'employment_status_invalid',
+            'child_age_inconsistency',
+            'inconsistent_data_format',
+            'documentation_incomplete'
+        ]
+        
+        if any(flags_dict.get(flag, False) for flag in critical_flags):
+            return "REQUIRES_REVIEW"
+        
+        household_income = app_data.get('household_income', 0)
+        employment_status = app_data.get('employment_status', '').lower()
+        num_children = app_data.get('num_children', 0)
+        
+        if (household_income > 0 and 
+            employment_status in ['employed', 'part-time', 'self-employed', 'unemployed'] and
+            num_children > 0):
+            return "APPROVED"
+        
+        return "REQUIRES_REVIEW"
+
+
+    def process_application(self, app_data: Dict[str, Any]) -> ProcessedApplication:
+        normalized_data = self.normalize_application_data(app_data)
+        validation_flags = self.validate_application(normalized_data)
+        
+        if (app_data.get('application_id') != normalized_data.get('application_id') or
+            app_data.get('num_children') != normalized_data.get('num_children') or
+            app_data.get('childcare_hours_requested') != normalized_data.get('childcare_hours_requested')):
+            validation_flags.inconsistent_data_format = True
+            
+        eligibility = self.assess_eligibility(normalized_data, validation_flags)
+        
+        return ProcessedApplication(
+            application_id=normalized_data['application_id'],
+            household_income=normalized_data['household_income'],
+            employment_status=normalized_data['employment_status'],
+            num_children=normalized_data['num_children'],
+            child_ages=normalized_data['child_ages'],
+            childcare_hours_requested=normalized_data['childcare_hours_requested'],
+            housing_situation=normalized_data['housing_situation'],
+            partner_employed=normalized_data['partner_employed'],
+            validation_flags=validation_flags,
+            eligibility_assessment=eligibility,
+            processed_timestamp=datetime.now().isoformat()
+        )
+
+    def process_all_applications(self, applications_data: List[Dict[str, Any]]) -> List[ProcessedApplication]:
+        return [self.process_application(app) for app in applications_data]
+
+    def load_json_file(self, file_path: str) -> List[Dict[str, Any]]:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+                if isinstance(data, list):
+                    return data
+                else:
+                    return [data]
+        except FileNotFoundError:
+            raise FileNotFoundError(f"JSON file not found: {file_path}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON format in file {file_path}: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error loading JSON file {file_path}: {str(e)}")
+
+
+processed_applications = []
+processor = SubsidyApplicationProcessor()
+
+
+llm_provider = MockLLMProvider()
+chatbot = ChatbotInterface(llm_provider)
+
+
+app = Flask(__name__)
+app.secret_key = 'subsidy_review_app_2025'
+
+def save_processing_results():
+    output_file = "processed_applications.json"
+    
+    try:
+
+        results = []
+        for app in processed_applications:
+            app_dict = asdict(app)
+            results.append(app_dict)
+        
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        
+        print(f"Processing results saved to {output_file}")
+        return output_file
+    except Exception as e:
+        print(f"Error saving processing results: {e}")
+        return None
+
+def load_and_process_applications():
+    global processed_applications, processor
+    
+    json_file_path = "Merged Subsidy Applications.json"
+    
+    try:
+        applications = processor.load_json_file(json_file_path)
+        processed_applications = processor.process_all_applications(applications)
+        print(f"Loaded and processed {len(processed_applications)} applications")
+        
+
+        save_processing_results()
+        
+    except Exception as e:
+        print(f"Error loading applications: {e}")
+        processed_applications = []
+
+@app.route('/')
+def dashboard():
+    pending_count = sum(1 for app in processed_applications 
+                       if app.eligibility_assessment == 'REQUIRES_REVIEW' and not app.reviewer_decision)
+    approved_count = sum(1 for app in processed_applications 
+                        if app.eligibility_assessment == 'APPROVED' or app.reviewer_decision == 'APPROVED')
+    rejected_count = sum(1 for app in processed_applications if app.reviewer_decision == 'REJECTED')
+    
+    return render_template_string(
+        DASHBOARD_TEMPLATE, 
+        applications=processed_applications,
+        pending_count=pending_count,
+        approved_count=approved_count,
+        rejected_count=rejected_count
+    )
+
+@app.route('/application/<application_id>')
+def application_detail(application_id):
+    app_data = None
+    for app in processed_applications:
+        if app.application_id == application_id:
+            app_data = app
+            break
+    
+    if not app_data:
+        return "Application not found", 404
+    
+
+    flags_dict = asdict(app_data.validation_flags)
+    active_flags = [k.replace('_', ' ').title() for k, v in flags_dict.items() if v]
+    
+    return render_template_string(
+        DETAIL_TEMPLATE, 
+        application=app_data, 
+        active_flags=active_flags,
+        flags_dict=flags_dict
+    )
+
+@app.route('/api/applications')
+def api_applications():
+    return jsonify([asdict(app) for app in processed_applications])
+
+@app.route('/api/application/<application_id>')
+def api_application_detail(application_id):
+    for app in processed_applications:
+        if app.application_id == application_id:
+            return jsonify(asdict(app))
+    return jsonify({"error": "Application not found"}), 404
+
+@app.route('/api/chatbot', methods=['POST'])
+def chatbot_query():
+    try:
+        data = request.get_json()
+        query = data.get('query', '')
+        application_id = data.get('application_id', None)
+        
+        if not query:
+            return jsonify({"error": "Query is required"}), 400
+        
+        response = chatbot.process_user_query(query, application_id)
+        return jsonify({"response": response})
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/review/<application_id>', methods=['POST'])
+def review_application(application_id):
+    try:
+        data = request.get_json()
+        decision = data.get('decision')
+        reason = data.get('reason', '')
+        notes = data.get('notes', '')
+        
+        if decision not in ['APPROVED', 'REJECTED']:
+            return jsonify({"error": "Decision must be 'APPROVED' or 'REJECTED'"}), 400
+        
+        app_index = None
+        for i, app in enumerate(processed_applications):
+            if app.application_id == application_id:
+                app_index = i
+                break
+        
+        if app_index is None:
+            return jsonify({"error": "Application not found"}), 404
+        
+        processed_applications[app_index].reviewer_decision = decision
+        processed_applications[app_index].reviewer_reason = reason
+        processed_applications[app_index].reviewer_notes = notes
+        processed_applications[app_index].review_timestamp = datetime.now().isoformat()
+        
+        save_processing_results()
+        
+        return jsonify({
+            "application_id": application_id,
+            "decision": decision,
+            "reason": reason,
+            "notes": notes,
+            "review_timestamp": processed_applications[app_index].review_timestamp
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/contact/<application_id>', methods=['POST'])
+def contact_applicant(application_id):
+    try:
+        data = request.get_json()
+        email = data.get('email', '')
+        message = data.get('message', '')
+        
+        if not email or not message:
+            return jsonify({"error": "Email and message are required"}), 400
+        
+        app_index = None
+        for i, app in enumerate(processed_applications):
+            if app.application_id == application_id:
+                app_index = i
+                break
+        
+        if app_index is None:
+            return jsonify({"error": "Application not found"}), 404
+        
+        processed_applications[app_index].contact_email = email
+        
+        print(f"Contact attempt for {application_id}: {email} - {message}")
+        
+        save_processing_results()
+        
+        return jsonify({
+            "application_id": application_id,
+            "email": email,
+            "message": "Contact logged successfully"
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/analyze/<application_id>', methods=['POST'])
+def analyze_application(application_id):
+    try:
+
+        app_index = None
+        for i, app in enumerate(processed_applications):
+            if app.application_id == application_id:
+                app_index = i
+                break
+        
+        if app_index is None:
+            return jsonify({"error": "Application not found"}), 404
+        
+
+        app_data = asdict(processed_applications[app_index])
+        llm_result = llm_provider.analyze_application(app_data)
+        
+
+        processed_applications[app_index].llm_analysis = llm_result['analysis']
+        processed_applications[app_index].llm_decision = llm_result['decision']
+        processed_applications[app_index].llm_reasoning = llm_result['reasoning']
+        
+
+        save_processing_results()
+        
+        return jsonify({
+            "application_id": application_id,
+            "llm_analysis": llm_result['analysis'],
+            "llm_decision": llm_result['decision'],
+            "llm_reasoning": llm_result['reasoning']
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+DASHBOARD_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Childcare Subsidy Applications Dashboard</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f7;
+        }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            margin: 0;
+            color: #1d1d1f;
+            font-size: 32px;
+            font-weight: 600;
+        }
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: #007aff;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            flex: 1;
+            min-width: 150px;
+        }
+        .stat-card:nth-child(2) {
+            background: #ff8c00;
+        }
+        .stat-card:nth-child(3) {
+            background: #28a745;
+        }
+        .stat-card:nth-child(4) {
+            background: #ff3b30;
+        }
+        .stat-card h3 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .stat-card p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+        }
+        .applications-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+        }
+        .application-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            cursor: pointer;
+        }
+        .application-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+        .app-id {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1d1d1f;
+            margin-bottom: 8px;
+        }
+        .app-hash {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            color: #8e8e93;
+            margin-bottom: 12px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .status-critical {
+            background: #ff3b30;
+            color: white;
+        }
+        .status-warning {
+            background: #ff9500;
+            color: white;
+        }
+        .status-review {
+            background: #ff8c00;
+            color: white;
+        }
+        .status-approved {
+            background: #28a745;
+            color: white;
+        }
+        .status-rejected {
+            background: #ff3b30;
+            color: white;
+        }
+        .flags {
+            margin-top: 12px;
+        }
+        .flag {
+            display: inline-block;
+            background: #f2f2f7;
+            color: #1d1d1f;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin: 2px 4px 2px 0;
+        }
+        .income-info {
+            color: #8e8e93;
+            font-size: 14px;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Childcare Subsidy Applications</h1>
+        <div class="stats">
+            <div class="stat-card">
+                <h3>{{ applications|length }}</h3>
+                <p>Total Applications</p>
+            </div>
+            <div class="stat-card">
+                <h3>{{ pending_count }}</h3>
+                <p>Pending Review</p>
+            </div>
+            <div class="stat-card">
+                <h3>{{ approved_count }}</h3>
+                <p>Approved</p>
+            </div>
+            <div class="stat-card">
+                <h3>{{ rejected_count }}</h3>
+                <p>Rejected</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="applications-grid">
+        {% for app in applications %}
+        <div class="application-card" onclick="window.location.href='/application/{{ app.application_id }}'">
+            <div class="app-id">{{ app.application_id }}</div>
+            
+            {% if app.eligibility_assessment == 'APPROVED' or app.reviewer_decision == 'APPROVED' %}
+                <span class="status-badge status-approved">✅ Approved</span>
+            {% elif app.reviewer_decision == 'REJECTED' %}
+                <span class="status-badge status-rejected">❌ Rejected</span>
+            {% else %}
+                <span class="status-badge status-review">⏳ Pending Review</span>
+            {% endif %}
+            
+            <div class="income-info">
+                Income: ${{ "{:,}".format(app.household_income) }} | 
+                Children: {{ app.num_children }} | 
+                Hours: {{ app.childcare_hours_requested }}
+            </div>
+            
+            <div class="flags">
+                {% set flags_dict = app.validation_flags.__dict__ %}
+                {% for key, value in flags_dict.items() %}
+                    {% if value and key != 'missing_application_id' %}
+                        <span class="flag">{{ key.replace('_', ' ').title() }}</span>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
+'''
+
+DETAIL_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application {{ application.application_id }} - Detail</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f7;
+        }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            margin-bottom: 30px;
+        }
+        .back-button {
+            background: #007aff;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 14px;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
+        .back-button:hover {
+            background: #0056cc;
+        }
+        .header h1 {
+            margin: 0;
+            color: #1d1d1f;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        @media (max-width: 768px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+        .section {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+        }
+        .section h2 {
+            margin: 0 0 20px 0;
+            color: #1d1d1f;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        .field {
+            margin-bottom: 16px;
+        }
+        .field-label {
+            font-weight: 600;
+            color: #1d1d1f;
+            margin-bottom: 4px;
+        }
+        .field-value {
+            color: #6e6e73;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 20px;
+        }
+        .status-critical {
+            background: #ff3b30;
+            color: white;
+        }
+        .status-warning {
+            background: #ff9500;
+            color: white;
+        }
+        .status-review {
+            background: #007aff;
+            color: white;
+        }
+        .flags-grid {
+            display: grid;
+            gap: 8px;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        }
+        .flag-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .flag-true {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        .flag-false {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+        .flag-icon {
+            margin-right: 8px;
+            font-weight: bold;
+        }
+        .notes-list {
+            list-style: none;
+            padding: 0;
+        }
+        .notes-list li {
+            background: #f2f2f7;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+        .hash-code {
+            font-family: 'SF Mono', Monaco, monospace;
+            background: #f2f2f7;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-button">← Back to Dashboard</a>
+    
+    <div class="header">
+        <h1>Application {{ application.application_id }}</h1>
+        
+        {% if application.eligibility_assessment == 'APPROVED' or application.reviewer_decision == 'APPROVED' %}
+            <div class="status-badge status-approved">✅ Approved</div>
+        {% elif application.reviewer_decision == 'REJECTED' %}
+            <div class="status-badge status-rejected">❌ Rejected</div>
+        {% else %}
+            <div class="status-badge status-review">⏳ Pending Review</div>
+        {% endif %}
+    </div>
+
+    <div class="content">
+        <div class="section">
+            <h2>Application Details</h2>
+            <div class="field">
+                <div class="field-label">Household Income</div>
+                <div class="field-value">${{ "{:,}".format(application.household_income) }}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Employment Status</div>
+                <div class="field-value">{{ application.employment_status.title() }}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Number of Children</div>
+                <div class="field-value">{{ application.num_children }}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Child Ages</div>
+                <div class="field-value">{{ application.child_ages | join(', ') if application.child_ages else 'Not specified' }}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Childcare Hours Requested</div>
+                <div class="field-value">{{ application.childcare_hours_requested }} hours/month</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Housing Situation</div>
+                <div class="field-value">{{ application.housing_situation.replace('_', ' ').title() }}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Partner Employed</div>
+                <div class="field-value">{{ 'Yes' if application.partner_employed else 'No' }}</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Validation Flags</h2>
+            <div class="flags-grid">
+                {% for key, value in flags_dict.items() %}
+                <div class="flag-item {{ 'flag-true' if value else 'flag-false' }}">
+                    <span class="flag-icon">{{ '⚠️' if value else '✅' }}</span>
+                    {{ key.replace('_', ' ').title() }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Eligibility Assessment</h2>
+            <div class="field-value">{{ application.eligibility_assessment }}</div>
+        </div>
+
+
+        <div class="section">
+            <h2>Review Status</h2>
+            {% if application.reviewer_decision %}
+                <div class="review-completed">
+                    <div class="field">
+                        <div class="field-label">Final Decision</div>
+                        <div class="field-value decision-{{ application.reviewer_decision.lower() }}">
+                            {% if application.reviewer_decision == 'APPROVED' %}
+                                ✅ APPROVED
+                            {% else %}
+                                ❌ REJECTED
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% if application.reviewer_reason %}
+                    <div class="field">
+                        <div class="field-label">Decision Reason</div>
+                        <div class="field-value">{{ application.reviewer_reason }}</div>
+                    </div>
+                    {% endif %}
+                    {% if application.reviewer_notes %}
+                    <div class="field">
+                        <div class="field-label">Additional Notes</div>
+                        <div class="field-value">{{ application.reviewer_notes }}</div>
+                    </div>
+                    {% endif %}
+                    <div class="field">
+                        <div class="field-label">Review Date</div>
+                        <div class="field-value">{{ application.review_timestamp }}</div>
+                    </div>
+                </div>
+            {% elif application.eligibility_assessment == 'REQUIRES_REVIEW' %}
+                <div class="review-form">
+                    <div class="field">
+                        <label for="reviewer-reason" class="field-label">Review Reason:</label>
+                        <textarea id="reviewer-reason" placeholder="Enter reason for decision..." class="review-textarea" style="min-height: 60px;"></textarea>
+                    </div>
+                    <div class="field">
+                        <label for="reviewer-notes" class="field-label">Additional Notes:</label>
+                        <textarea id="reviewer-notes" placeholder="Additional notes (optional)..." class="review-textarea" style="min-height: 60px;"></textarea>
+                    </div>
+                    <div class="review-buttons">
+                        <button onclick="reviewApplication('APPROVED')" class="review-btn approve-btn">✅ Approve</button>
+                        <button onclick="reviewApplication('REJECTED')" class="review-btn reject-btn">❌ Reject</button>
+                    </div>
+                </div>
+            {% elif application.eligibility_assessment == 'APPROVED' %}
+                <div class="auto-approved">
+                    <p><strong>Assessment Date:</strong> {{ application.processed_timestamp[:19].replace('T', ' ') }}</p>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <h3>Override Auto-Approval</h3>
+                    <p style="color: #666; margin-bottom: 15px;">If you need to change the status of this auto-approved application, provide a reason below.</p>
+                    <div class="review-form">
+                        <div class="field">
+                            <label for="reviewer-reason" class="field-label">Reason for Status Change:</label>
+                            <textarea id="reviewer-reason" placeholder="Please provide a reason for changing the status..." class="review-textarea" style="min-height: 60px;"></textarea>
+                        </div>
+                        <div class="field">
+                            <label for="reviewer-notes" class="field-label">Additional Notes:</label>
+                            <textarea id="reviewer-notes" placeholder="Additional notes (optional)..." class="review-textarea" style="min-height: 60px;"></textarea>
+                        </div>
+                        <div class="review-buttons" >
+                            <button onclick="reviewApplication('APPROVED')" class="review-btn approve-btn">✅ Keep Approved</button>
+                            <button onclick="reviewApplication('REJECTED')" class="review-btn reject-btn">❌ Reject Application</button>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="pending-review">
+                    <p>This application has not been reviewed yet.</p>
+                </div>
+            {% endif %}
+        </div>
+        
+        {% if not application.reviewer_decision %}
+        <div class="section">
+            <h2>Contact Applicant</h2>
+            <div class="contact-form">
+                <div class="field">
+                    <label for="contact-email" class="field-label">Email:</label>
+                    <input type="email" id="contact-email" placeholder="applicant@example.com" class="contact-input">
+                </div>
+                <div class="field">
+                    <label for="contact-message" class="field-label">Message:</label>
+                    <textarea id="contact-message" placeholder="Enter your message..." class="contact-textarea" style="min-height: 80px;"></textarea>
+                </div>
+                <button onclick="contactApplicant()" class="contact-btn">📧 Send Message</button>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="section">
+            <h2>Chatbot Assistant</h2>
+            <div class="chatbot-container">
+                <div id="chat-messages" class="chat-messages"></div>
+                <div class="chat-input-container">
+                    <input type="text" id="chat-input" placeholder="Ask about this application..." class="chat-input">
+                    <button onclick="sendChatMessage()" class="chat-send-btn">Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function analyzeLLM(applicationId) {
+            const btn = document.getElementById('analyze-btn');
+            btn.disabled = true;
+            btn.textContent = 'Analyzing...';
+            
+            try {
+                const response = await fetch(`/api/analyze/${applicationId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('llm-results').innerHTML = `
+                        <div class="field">
+                            <div class="field-label">Analysis</div>
+                            <div class="field-value">${result.llm_analysis}</div>
+                        </div>
+                        <div class="field">
+                            <div class="field-label">Decision</div>
+                            <div class="field-value">${result.llm_decision}</div>
+                        </div>
+                        <div class="field">
+                            <div class="field-label">Reasoning</div>
+                            <div class="field-value">${result.llm_reasoning}</div>
+                        </div>
+                    `;
+                    document.getElementById('llm-results').style.display = 'block';
+                    btn.style.display = 'none';
+                } else {
+                    alert('Error: ' + result.error);
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze with LLM';
+                }
+            } catch (error) {
+                alert('Error analyzing application: ' + error.message);
+                btn.disabled = false;
+                btn.textContent = 'Analyze with LLM';
+            }
+        }
+
+        async function reviewApplication(decision) {
+            const reason = document.getElementById('reviewer-reason').value.trim();
+            const notes = document.getElementById('reviewer-notes').value.trim();
+            
+            if (!reason) {
+                alert('Please provide a reason for your decision.');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/review/{{ application.application_id }}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        decision: decision,
+                        reason: reason,
+                        notes: notes
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    alert(`Application ${decision.toLowerCase()} successfully!`);
+                    location.reload();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error reviewing application: ' + error.message);
+            }
+        }
+        
+        async function contactApplicant() {
+            const email = document.getElementById('contact-email').value.trim();
+            const message = document.getElementById('contact-message').value.trim();
+            
+            if (!email || !message) {
+                alert('Please provide both email and message.');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/contact/{{ application.application_id }}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        message: message
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    alert('Message sent successfully!');
+                    document.getElementById('contact-email').value = '';
+                    document.getElementById('contact-message').value = '';
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error sending message: ' + error.message);
+            }
+        }
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chat-input');
+            const query = input.value.trim();
+            
+            if (!query) return;
+            
+            const messagesContainer = document.getElementById('chat-messages');
+            
+            // Add user message
+            messagesContainer.innerHTML += `
+                <div class="chat-message user-message">
+                    <strong>You:</strong> ${query}
+                </div>
+            `;
+            
+            input.value = '';
+            
+            try {
+                const response = await fetch('/api/chatbot', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        application_id: '{{ application.application_id }}'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message bot-message">
+                            <strong>Assistant:</strong> <pre>${result.response}</pre>
+                        </div>
+                    `;
+                } else {
+                    messagesContainer.innerHTML += `
+                        <div class="chat-message error-message">
+                            <strong>Error:</strong> ${result.error}
+                        </div>
+                    `;
+                }
+                
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                
+            } catch (error) {
+                messagesContainer.innerHTML += `
+                    <div class="chat-message error-message">
+                        <strong>Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Allow Enter key to send messages
+        document.getElementById('chat-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendChatMessage();
+            }
+        });
+    </script>
+
+    <style>
+        .analyze-button {
+            background: #007aff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .analyze-button:hover {
+            background: #0056cc;
+        }
+        .analyze-button:disabled {
+            background: #8e8e93;
+            cursor: not-allowed;
+        }
+        .chatbot-container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            background: #fafafa;
+        }
+        .chat-messages {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+            padding: 8px;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+        .chat-message {
+            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .user-message {
+            background: #e3f2fd;
+            text-align: right;
+        }
+        .bot-message {
+            background: #f5f5f5;
+        }
+        .bot-message pre {
+            white-space: pre-wrap;
+            font-family: inherit;
+            margin: 4px 0 0 0;
+        }
+        .error-message {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        .chat-input-container {
+            display: flex;
+            gap: 8px;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .chat-send-btn {
+            background: #007aff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .chat-send-btn:hover {
+            background: #0056cc;
+        }
+        .review-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        .review-textarea {
+            width: 95%;
+            min-height: 80px;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+        }
+        .review-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .review-btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+        .approve-btn {
+            background: #34c759;
+            color: white;
+        }
+        .approve-btn:hover {
+            background: #28a745;
+        }
+        .reject-btn {
+            background: #ff3b30;
+            color: white;
+        }
+        .reject-btn:hover {
+            background: #dc3545;
+        }
+        .review-result {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        .decision-approved {
+            color: #34c759;
+            font-weight: 600;
+        }
+        .decision-rejected {
+            color: #ff3b30;
+            font-weight: 600;
+        }
+        .contact-form {
+            background: #f0f8ff;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #b3d9ff;
+        }
+        .contact-input {
+            width: 95%;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .contact-textarea {
+            width: 95%;
+            min-height: 100px;
+            padding: 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+        }
+        .contact-btn {
+            background: #007aff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            margin-top: 12px;
+        }
+        .contact-btn:hover {
+            background: #0056cc;
+        }
+        .review-completed {
+            background: #f0f8ff;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #007aff;
+        }
+        .pending-review {
+            background: #fff8e1;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #ffa726;
+            text-align: center;
+            color: #e65100;
+        }
+        .status-approved {
+            background: #28a745;
+            color: white;
+        }
+        .status-rejected {
+            background: #ff3b30;
+            color: white;
+        }
+        .status-review {
+            background: #ff8c00;
+            color: white;
+        }
+    </style>
+</body>
+</html>
+'''
+
+def main():
+    load_and_process_applications()
+    print("Starting web application on http://localhost:8081")
+    app.run(debug=True, host='0.0.0.0', port=8081)
+
+if __name__ == "__main__":
+    main()
